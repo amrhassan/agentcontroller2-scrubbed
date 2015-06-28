@@ -4,23 +4,39 @@ import (
 	"fmt"
 	"flag"
 	"net/http"
+	"net/url"
 	"io/ioutil"
 	"github.com/gin-gonic/gin"
 	"github.com/garyburd/redigo/redis"
 	"encoding/json"
+	"time"
+	"github.com/influxdb/influxdb/client"
 )
 
 //
 // data types
 //
 type CommandMessage struct {
-	Id   int    `json:"id"`
-	Gid  int    `json:"gid"`
-	Nid  int    `json:"nid"`
-	// Cmd  string   `json:"cmd"`
-	// Args []string `json:"args"`
-	// Data string   `json:"id"`
+	Id   int     `json:"id"`
+	Gid  int     `json:"gid"`
+	Nid  int     `json:"nid"`
 }
+
+type StatsRequest struct {
+	Timestamp int        `json:"timestamp"`
+	Series []struct {
+		Key string   `json:"key"`
+		Value string `json:"value"`
+	}
+}
+
+const (
+	InfluxHost = "172.17.0.1"
+	InfluxPort = 8086
+	InfluxDb   = "stats"
+	InfluxUser = "user"
+	InfluxPass = "pass"
+)
 
 //
 // redis stuff
@@ -128,7 +144,7 @@ func cmd(c *gin.Context) {
 	c.String(http.StatusOK, payload)
 }
 
-func log(c *gin.Context) {
+func logs(c *gin.Context) {
 	gid := c.Param("gid")
 	nid := c.Param("nid")
 	
@@ -216,7 +232,77 @@ func stats(c *gin.Context) {
 	
 	fmt.Printf("[+] gin: stats (gid: %s, nid: %s)\n", gid, nid)
 	
+	//
+	// read body
+	//
+	content, err := ioutil.ReadAll(c.Request.Body)
 	
+	if err != nil {
+		fmt.Println("[-] cannot read body:", err)
+		return
+	}
+	
+	//
+	// decode body
+	//
+	var payload StatsRequest
+	err = json.Unmarshal(content, &payload)
+	
+	if err != nil {
+		fmt.Println("[-] cannot read json:", err)
+		return
+	}
+	
+	//
+	// building Influxdb request
+	//
+	u, err := url.Parse(fmt.Sprintf("http://%s:%d", InfluxHost, InfluxPort))
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	conf := client.Config{
+		URL: *u,
+		Username: InfluxUser,
+		Password: InfluxPass,
+	}
+
+	con, err := client.NewClient(conf)
+	if err != nil {
+		fmt.Println(err)
+	}
+	
+	// Points memory map
+	var timestamp = payload.Timestamp
+	var points = make([]client.Point, len(payload.Series))
+	
+	for i := 0; i < len(payload.Series); i++ {
+		points[i] = client.Point{
+			Measurement: "stats",
+			Tags: map[string]string{
+				"gid": gid,
+				"nid": nid,
+			},
+			Fields: map[string]interface{}{
+				payload.Series[i].Key: payload.Series[i].Value,
+			},
+			Time: time.Unix(int64(timestamp), 0),
+		}
+	}
+	
+	//
+	// insert data to influxdb
+	//
+	bps := client.BatchPoints{
+		Points:          points,
+		Database:        InfluxDb,
+	}
+	
+	_, err = con.Write(bps)
+	if err != nil {
+		fmt.Println(err)
+	}
+
 	
 	//
 	c.JSON(http.StatusOK, "ok")
@@ -236,10 +322,10 @@ func main() {
 	go cmdreader()
 	
 	router.GET("/:gid/:nid/cmd", cmd)
-	router.POST("/:gid/:nid/log", log)
+	router.POST("/:gid/:nid/log", logs)
 	router.POST("/:gid/:nid/result", result)
-	router.GET("/:gid/:nid/stats", stats)
-	
+	router.POST("/:gid/:nid/stats", stats)
+	// router.Static("/doc", "./doc")
 	
 	router.Run(*ginPtr)
 }
