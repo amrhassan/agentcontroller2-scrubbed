@@ -213,7 +213,7 @@ func result(c *gin.Context) {
 	//
 	// push body to redis
 	//
-	id := fmt.Sprintf("%d:%d:%d", payload.Gid, payload.Nid, payload.Id)
+	id := fmt.Sprintf("%d:%d:%s", payload.Gid, payload.Nid, payload.Id)
 	fmt.Printf("[+] message destination [%s]\n", id)
 
 
