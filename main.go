@@ -4,38 +4,33 @@ import (
 	"fmt"
 	"flag"
 	"net/http"
-	"net/url"
+	_ "net/url"
 	"io/ioutil"
 	"github.com/gin-gonic/gin"
 	"github.com/garyburd/redigo/redis"
 	"encoding/json"
-	"time"
-	"github.com/influxdb/influxdb/client"
+	"github.com/Jumpscale/jsagentcontroller/influxdb-client-0.8.8"
 )
 
 //
 // data types
 //
 type CommandMessage struct {
-	Id   string     `json:"id"`
+	Id   string  `json:"id"`
 	Gid  int     `json:"gid"`
 	Nid  int     `json:"nid"`
 }
 
 type StatsRequest struct {
-	Timestamp int        `json:"timestamp"`
-	Series []struct {
-		Key string   `json:"key"`
-		Value string `json:"value"`
-	}
+	Timestamp int             `json:"timestamp"`
+	Series    [][]interface{} `json:"series"`
 }
 
 const (
-	InfluxHost = "172.17.0.1"
-	InfluxPort = 8086
-	InfluxDb   = "stats"
-	InfluxUser = "user"
-	InfluxPass = "pass"
+	InfluxHost = "172.17.0.1:8086"
+	InfluxDb   = "agentcontroller"
+	InfluxUser = "ac"
+	InfluxPass = "acctrl"
 )
 
 //
@@ -160,6 +155,7 @@ func logs(c *gin.Context) {
 
 	if err != nil {
 		fmt.Println("[-] cannot read body:", err)
+		c.JSON(http.StatusInternalServerError, "error")
 		return
 	}
 
@@ -194,6 +190,7 @@ func result(c *gin.Context) {
 
 	if err != nil {
 		fmt.Println("[-] cannot read body:", err)
+		c.JSON(http.StatusInternalServerError, "body error")
 		return
 	}
 
@@ -205,6 +202,7 @@ func result(c *gin.Context) {
 
 	if err != nil {
 		fmt.Println("[-] cannot read json:", err)
+		c.JSON(http.StatusInternalServerError, "json error")
 		return
 	}
 
@@ -239,6 +237,7 @@ func stats(c *gin.Context) {
 
 	if err != nil {
 		fmt.Println("[-] cannot read body:", err)
+		c.JSON(http.StatusInternalServerError, "body error")
 		return
 	}
 
@@ -250,59 +249,46 @@ func stats(c *gin.Context) {
 
 	if err != nil {
 		fmt.Println("[-] cannot read json:", err)
+		c.JSON(http.StatusInternalServerError, "json error")
 		return
 	}
 
 	//
-	// building Influxdb request
+	// building Influxdb requests
 	//
-	u, err := url.Parse(fmt.Sprintf("http://%s:%d", InfluxHost, InfluxPort))
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	conf := client.Config{
-		URL: *u,
+	con, err := client.NewClient(&client.ClientConfig{
 		Username: InfluxUser,
 		Password: InfluxPass,
-	}
+		Database: InfluxDb,
+		Host:     InfluxHost,
+	})
 
-	con, err := client.NewClient(conf)
 	if err != nil {
 		fmt.Println(err)
 	}
-
-	// Points memory map
+	
 	var timestamp = payload.Timestamp
-	var points = make([]client.Point, len(payload.Series))
 
 	for i := 0; i < len(payload.Series); i++ {
-		points[i] = client.Point{
-			Measurement: "stats",
-			Tags: map[string]string{
-				"gid": gid,
-				"nid": nid,
+		series := &client.Series{
+			Name: "test",
+			Columns: []string{"gid", "nid", "time", "key", "value"},
+			Points: [][]interface{} {
+				{
+				gid,
+				nid,
+				int64(timestamp),
+				payload.Series[i][0],
+				payload.Series[i][1],
+				},
 			},
-			Fields: map[string]interface{}{
-				payload.Series[i].Key: payload.Series[i].Value,
-			},
-			Time: time.Unix(int64(timestamp), 0),
+		}
+
+		if err := con.WriteSeries([]*client.Series{series}); err != nil {
+			fmt.Println(err)
+			return
 		}
 	}
-
-	//
-	// insert data to influxdb
-	//
-	bps := client.BatchPoints{
-		Points:          points,
-		Database:        InfluxDb,
-	}
-
-	_, err = con.Write(bps)
-	if err != nil {
-		fmt.Println(err)
-	}
-
 
 	//
 	c.JSON(http.StatusOK, "ok")
