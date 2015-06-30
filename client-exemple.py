@@ -15,7 +15,7 @@ def main():
 	client = acclient.Client(address='localhost', port=6379, db=0)
 	
 	print("Sending command")
-	cmd = client.Cmd(args.id, args.gid, args.nid, args.cmd, args.args)
+	cmd = client.Cmd(args.id, args.gid, args.nid, args.cmd, args.args, [])
 	client.Run(cmd)
 	
 	print("Waiting result")

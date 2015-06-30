@@ -13,8 +13,9 @@ class Client:
 	
 	"""
 	Prepare a command request, return the json request
+	Note: args and data should be array/objects
 	"""
-	def Cmd(self, id, gid, nid, cmd, args):
+	def Cmd(self, id, gid, nid, cmd, args, data):
 		# Building local object to push
 		datatable = {
 			'id': id,
@@ -22,7 +23,7 @@ class Client:
 			'nid': string.atoi(nid),
 			'cmd': cmd,
 			'args': args,
-			'data': ''
+			'data': data
 		}
 		
 		# Return json which will be pushed

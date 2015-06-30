@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"flag"
 	"net/http"
-	_ "net/url"
 	"io/ioutil"
 	"github.com/gin-gonic/gin"
 	"github.com/garyburd/redigo/redis"
@@ -211,14 +210,13 @@ func result(c *gin.Context) {
 	//
 	// push body to redis
 	//
-	id := fmt.Sprintf("%d:%d:%s", payload.Gid, payload.Nid, payload.Id)
-	fmt.Printf("[+] message destination [%s]\n", id)
+	fmt.Printf("[+] message destination [%s]\n", payload.Id)
 
 
 	//
 	// push message to client queue
 	//
-	_, err = db.Do("RPUSH", id, content)
+	_, err = db.Do("RPUSH", payload.Id, content)
 
 	//
 	c.JSON(http.StatusOK, "ok")
@@ -273,15 +271,14 @@ func stats(c *gin.Context) {
 		series := &client.Series{
 			Name: "test",
 			Columns: []string{"gid", "nid", "time", "key", "value"},
-			Points: [][]interface{} {
-				{
+			// FIXME: add all points then write once
+			Points: [][]interface{} {{
 				gid,
 				nid,
 				int64(timestamp),
 				payload.Series[i][0],
 				payload.Series[i][1],
-				},
-			},
+			},},
 		}
 
 		if err := con.WriteSeries([]*client.Series{series}); err != nil {

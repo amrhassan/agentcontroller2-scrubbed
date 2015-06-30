@@ -1,5 +1,5 @@
 # jsagentcontroller
-JumpScale Agentcontroller in GO
+JumpScale Agentcontroller in Go
 
 # REST Service
 Note: GID, NID and JID is extracted from URL or from JSON body
@@ -12,10 +12,11 @@ Note: GID, NID and JID is extracted from URL or from JSON body
 * Push logs to redis queue (*$GID:$NID:LOG*)
 
 ## POST /[gid]/[nid]/result
-* Push logs to redis queue (*$GID:$NID:$JID*)
+* Push job result to redis queue (*$JID*)
 
 ## GET /[gid]/[nid]/stats
-_ not implemented _
+* Save logs in influxdb database
+* Format: {timestamp: xxx, series: [[key, value], [key, value], ...]}
 
 # Commands Reader
 * Wait for commands from *\_\_master\_\_* queue
