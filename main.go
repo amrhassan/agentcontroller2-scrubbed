@@ -292,7 +292,7 @@ func stats(c *gin.Context) {
 }
 
 func main() {
-	ginPtr := flag.String("p", ":8080", "webservice listen addr:port")
+	ginPtr := flag.String("p", ":8966", "webservice listen addr:port")
 	redisPtr := flag.String("r", ":6379", "redis connect addr:port")
 	flag.Parse()
 
