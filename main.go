@@ -64,7 +64,7 @@ func cmdreader() {
 		//
 		// waiting message from master queue
 		//
-		command, err := redis.Strings(db.Do("BLPOP", "__master__", "0"))
+		command, err := redis.Strings(db.Do("BLPOP", "cmds_queue", "0"))
 
 		fmt.Println("[+] message from master redis queue")
 
@@ -216,7 +216,7 @@ func result(c *gin.Context) {
 	//
 	// push message to client queue
 	//
-	_, err = db.Do("RPUSH", payload.Id, content)
+	_, err = db.Do("RPUSH", fmt.Sprintf("cmds_queue_%s", payload.Id), content)
 
 	//
 	c.JSON(http.StatusOK, "ok")
@@ -264,7 +264,7 @@ func stats(c *gin.Context) {
 	if err != nil {
 		fmt.Println(err)
 	}
-	
+
 	var timestamp = payload.Timestamp
 
 	for i := 0; i < len(payload.Series); i++ {
