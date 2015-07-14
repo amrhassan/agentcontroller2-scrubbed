@@ -1,15 +1,47 @@
 package main
 
 import (
+	"os"
 	"fmt"
 	"flag"
 	"net/http"
 	"io/ioutil"
 	"github.com/gin-gonic/gin"
 	"github.com/garyburd/redigo/redis"
+	"github.com/naoina/toml"
 	"encoding/json"
 	"github.com/Jumpscale/jsagentcontroller/influxdb-client-0.8.8"
 )
+
+type Settings struct {
+	Main struct {
+		Listen string
+		Redis string
+	}
+
+	Influxdb struct {
+		Host string
+		Db string
+		User string
+		Password string
+	}
+}
+
+//LoadTomlFile loads toml using "github.com/naoina/toml"
+func LoadTomlFile(filename string, v interface{}) {
+	f, err := os.Open(filename)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	buf, err := ioutil.ReadAll(f)
+	if err != nil {
+		panic(err)
+	}
+	if err := toml.Unmarshal(buf, v); err != nil {
+		panic(err)
+	}
+}
 
 //
 // data types
@@ -24,13 +56,6 @@ type StatsRequest struct {
 	Timestamp int             `json:"timestamp"`
 	Series    [][]interface{} `json:"series"`
 }
-
-const (
-	InfluxHost = "172.17.0.1:8086"
-	InfluxDb   = "agentcontroller"
-	InfluxUser = "ac"
-	InfluxPass = "acctrl"
-)
 
 //
 // redis stuff
@@ -58,7 +83,7 @@ var pool *redis.Pool
 //
 func cmdreader() {
 	db := pool.Get()
-        defer db.Close()
+		defer db.Close()
 
 	for {
 		//
@@ -114,23 +139,23 @@ func cmd(c *gin.Context) {
 	// New connection, checking this queue
 	//
 	db := pool.Get()
-        defer db.Close()
+		defer db.Close()
 
 	id := fmt.Sprintf("%s:%s", gid, nid)
 	fmt.Printf("[+] waiting data from [%s]\n", id)
 
-        pending, err := redis.Strings(db.Do("BLPOP", id, "0"))
+		pending, err := redis.Strings(db.Do("BLPOP", id, "0"))
 
-        if err != nil {
+		if err != nil {
 		c.JSON(http.StatusInternalServerError, "error")
 		return
 	}
 
-        //
-        // extracting data from redis response
-        //
-        payload := pending[1]
-        fmt.Printf("[+] payload: %s\n", payload)
+		//
+		// extracting data from redis response
+		//
+		payload := pending[1]
+		fmt.Printf("[+] payload: %s\n", payload)
 
 	//
 	// http reply
@@ -143,7 +168,7 @@ func logs(c *gin.Context) {
 	nid := c.Param("nid")
 
 	db := pool.Get()
-        defer db.Close()
+		defer db.Close()
 
 	fmt.Printf("[+] gin: log (gid: %s, nid: %s)\n", gid, nid)
 
@@ -178,7 +203,7 @@ func result(c *gin.Context) {
 	nid := c.Param("nid")
 
 	db := pool.Get()
-        defer db.Close()
+		defer db.Close()
 
 	fmt.Printf("[+] gin: result (gid: %s, nid: %s)\n", gid, nid)
 
@@ -255,10 +280,10 @@ func stats(c *gin.Context) {
 	// building Influxdb requests
 	//
 	con, err := client.NewClient(&client.ClientConfig{
-		Username: InfluxUser,
-		Password: InfluxPass,
-		Database: InfluxDb,
-		Host:     InfluxHost,
+		Username: settings.Influxdb.User,
+		Password: settings.Influxdb.Password,
+		Database: settings.Influxdb.Db,
+		Host:     settings.Influxdb.Host,
 	})
 
 	if err != nil {
@@ -291,15 +316,38 @@ func stats(c *gin.Context) {
 	c.JSON(http.StatusOK, "ok")
 }
 
+var settings Settings
+
 func main() {
-	ginPtr := flag.String("p", ":8966", "webservice listen addr:port")
-	redisPtr := flag.String("r", ":6379", "redis connect addr:port")
+	var cfg string
+	var help bool
+
+	flag.BoolVar(&help, "h", false, "Print this help screen")
+	flag.StringVar(&cfg, "c", "", "Path to config file")
 	flag.Parse()
 
-	fmt.Printf("[+] webservice: <%s>\n", *ginPtr)
-	fmt.Printf("[+] redis server: <%s>\n", *redisPtr)
+	printHelp := func() {
+		fmt.Println("agentcontroller [options]")
+		flag.PrintDefaults()
+	}
 
-	pool = newPool(*redisPtr)
+	if help {
+		printHelp()
+		return
+	}
+
+	if cfg == "" {
+		fmt.Println("Missing required option -c")
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
+
+	LoadTomlFile(cfg, &settings)
+
+	fmt.Printf("[+] webservice: <%s>\n", settings.Main.Listen)
+	fmt.Printf("[+] redis server: <%s>\n", settings.Main.Redis)
+
+	pool = newPool(settings.Main.Redis)
 	router := gin.Default()
 
 	go cmdreader()
@@ -310,5 +358,5 @@ func main() {
 	router.POST("/:gid/:nid/stats", stats)
 	// router.Static("/doc", "./doc")
 
-	router.Run(*ginPtr)
+	router.Run(settings.Main.Listen)
 }
