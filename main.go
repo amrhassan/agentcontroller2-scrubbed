@@ -54,7 +54,7 @@ type CommandMessage struct {
 }
 
 type StatsRequest struct {
-	Timestamp int             `json:"timestamp"`
+	Timestamp int64             `json:"timestamp"`
 	Series    [][]interface{} `json:"series"`
 }
 
@@ -299,25 +299,25 @@ func stats(c *gin.Context) {
 	}
 
 	var timestamp = payload.Timestamp
+	seriesList := make([]*client.Series, len(payload.Series))
 
 	for i := 0; i < len(payload.Series); i++ {
 		series := &client.Series{
-			Name: "test",
-			Columns: []string{"gid", "nid", "time", "key", "value"},
+			Name: payload.Series[i][0].(string),
+			Columns: []string{"time", "value"},
 			// FIXME: add all points then write once
 			Points: [][]interface{} {{
-				gid,
-				nid,
-				int64(timestamp),
-				payload.Series[i][0],
+				timestamp * 1000, //influx expects time in ms
 				payload.Series[i][1],
 			},},
 		}
 
-		if err := con.WriteSeries([]*client.Series{series}); err != nil {
-			fmt.Println(err)
-			return
-		}
+		seriesList[i] =  series
+	}
+
+	if err := con.WriteSeries(seriesList); err != nil {
+		fmt.Println(err)
+		return
 	}
 
 	//
