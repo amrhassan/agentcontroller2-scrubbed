@@ -73,7 +73,7 @@ class RunArgs(object):
     def dump(self):
         dump = {}
         for key in ('domain', 'name', 'max_time', 'max_restart', 'recurring_period',
-                    'stats_interval', 'loglevels', 'loglevels_db', 'loglevels_ac'):
+                    'stats_interval', 'args', 'loglevels', 'loglevels_db', 'loglevels_ac'):
             value = getattr(self, key)
             if value:
                 dump[key] = value
@@ -234,6 +234,9 @@ class Client(object):
         :data: Raw data to the command stdin. (see cmd)
         :id: Optional command id (see cmd)
         """
+        if cmdargs is not None and not isinstance(cmdargs, list):
+            raise ValueError('cmdargs must be a list')
+
         run_args = RunArgs(name=executable, args=cmdargs)
         if args is not None:
             run_args = args.update(run_args)
