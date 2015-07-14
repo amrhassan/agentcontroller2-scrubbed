@@ -16,7 +16,8 @@ import (
 type Settings struct {
 	Main struct {
 		Listen string
-		Redis string
+		RedisHost string
+		RedisPassword string
 	}
 
 	Influxdb struct {
@@ -60,7 +61,7 @@ type StatsRequest struct {
 //
 // redis stuff
 //
-func newPool(addr string) *redis.Pool {
+func newPool(addr string, password string) *redis.Pool {
 	return &redis.Pool {
 		MaxIdle: 80,
 		MaxActive: 12000,
@@ -69,6 +70,13 @@ func newPool(addr string) *redis.Pool {
 
 			if err != nil {
 				panic(err.Error())
+			}
+
+			if password != "" {
+				if _, err := c.Do("AUTH", password); err != nil {
+					c.Close()
+					return nil, err
+				}
 			}
 
 			return c, err
@@ -345,9 +353,9 @@ func main() {
 	LoadTomlFile(cfg, &settings)
 
 	fmt.Printf("[+] webservice: <%s>\n", settings.Main.Listen)
-	fmt.Printf("[+] redis server: <%s>\n", settings.Main.Redis)
+	fmt.Printf("[+] redis server: <%s>\n", settings.Main.RedisHost)
 
-	pool = newPool(settings.Main.Redis)
+	pool = newPool(settings.Main.RedisHost, settings.Main.RedisPassword)
 	router := gin.Default()
 
 	go cmdreader()

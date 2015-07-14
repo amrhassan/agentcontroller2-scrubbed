@@ -1,6 +1,7 @@
 [main]
 Listen = ":8966"
-Redis =  ":6379"
+RedisHost =  ":6379"
+RedisPassword = ""
 
 [influxdb]
 Host = "172.17.0.1:8086"
