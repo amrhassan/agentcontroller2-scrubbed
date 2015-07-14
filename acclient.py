@@ -4,6 +4,15 @@ import uuid
 
 GET_INFO_TIMEOUT = 60
 
+CMD_EXECUTE = 'execute'
+CMD_EXECUTE_JS_PY = 'execute_js_py'
+CMD_EXECUTE_JS_LUA = 'execute_js_lua'
+CMD_GET_CPU_INFO = 'get_cpu_info'
+CMD_GET_NIC_INFO = 'get_nic_info'
+CMD_GET_OS_INFO = 'get_os_info'
+CMD_GET_DISK_INFO = 'get_disk_info'
+CMD_GET_MEM_INFO = 'get_mem_info'
+
 
 class RunArgs(object):
     def __init__(self, domain=None, name=None, max_time=0, max_restart=0,
@@ -76,6 +85,8 @@ class RunArgs(object):
             data = args.dump()
         elif isinstance(args, dict):
             data = args
+        elif args is None:
+            data = {}
         else:
             raise ValueError('Expecting RunArgs or dict')
 
@@ -83,18 +94,12 @@ class RunArgs(object):
         return RunArgs(**base)
 
 
-class Cmd(object):
-    def __init__(self, redis_client, id, gid, nid, cmd, run_args, data):
-        if not isinstance(run_args, RunArgs):
-            raise ValueError('Invalid arguments')
-
+class BaseCmd(object):
+    def __init__(self, redis_client, id, gid, nid):
         self._redis = redis_client
         self._id = id
-        self._gid = int(gid)
-        self._nid = int(nid)
-        self._cmd = cmd
-        self._args = run_args
-        self._data = data
+        self._gid = gid
+        self._nid = nid
 
     @property
     def id(self):
@@ -107,6 +112,24 @@ class Cmd(object):
     @property
     def nid(self):
         return self._nid
+
+    def get_result(self, timeout=0):
+        queue, result = self._redis.blpop("cmds_queue_%s" % self.id, timeout)
+        return json.loads(result)
+
+    def kill(self):
+        raise NotImplemented()
+
+
+class Cmd(BaseCmd):
+    def __init__(self, redis_client, id, gid, nid, cmd, run_args, data):
+        if not isinstance(run_args, RunArgs):
+            raise ValueError('Invalid arguments')
+
+        super(Cmd, self).__init__(redis_client, id, gid, nid)
+        self._cmd = cmd
+        self._args = run_args
+        self._data = data
 
     @property
     def cmd(self):
@@ -130,10 +153,6 @@ class Cmd(object):
             'data': json.dumps(self.data) if self.data is not None else ''
         }
 
-    def get_result(self, timeout=0):
-        queue, result = self._redis.blpop("cmds_queue_%s" % self.id, timeout)
-        return json.loads(result)
-
 
 class BoundClient(object):
     def __init__(self, client, gid, nid, default_args):
@@ -150,6 +169,14 @@ class BoundClient(object):
     def cmd(self, cmd, args, data, id=None):
         args = self._get_args(args)
         return self._client.cmd(self._gid, self._nid, cmd, args, data, id=None)
+
+    def get_by_id(self, id):
+        return self._client.get_by_id(self._gid, self._nid, id)
+
+    def execute(self, executable, cmdargs=None, args=None, data=None, id=None):
+        args = self._get_args(args)
+        return self._client.execute(self._gid, self._nid,
+                                    executable, cmdargs, args, data, id)
 
     def get_cpu_info(self):
         return self._client.get_cpu_info(self._gid, self._nid)
@@ -181,6 +208,12 @@ class Client(object):
     def cmd(self, gid, nid, cmd, args, data=None, id=None):
         """
         Executes a command, return a cmd descriptor
+        :gid: grid id
+        :nid: node id
+        :cmd: one of the supported commands (execute, execute_js_py, get_?_info, etc...)
+        :args: instance of RunArgs
+        :data: Raw data to send to the command standard input. Passed as objecte and will be dumped as json on wire
+        :id: id of command for retrieve later, if None a random GUID will be generated.
         """
         cmd_id = id or str(uuid.uuid4())
 
@@ -190,25 +223,48 @@ class Client(object):
         self._redis.lpush('cmds_queue', payload)
         return cmd
 
+    def execute(self, gid, nid, executable, cmdargs=None, args=None, data=None, id=None):
+        """
+        Short cut for cmd.execute
+        :gid: grid id
+        :nid: node id
+        :executable: the executable to run_args
+        :cmdargs: An optional array with command line arguments
+        :args: Optional RunArgs
+        :data: Raw data to the command stdin. (see cmd)
+        :id: Optional command id (see cmd)
+        """
+        run_args = RunArgs(name=executable, args=cmdargs)
+        if args is not None:
+            run_args = args.update(run_args)
+
+        return self.cmd(gid, nid, CMD_EXECUTE, run_args, data, id)
+
+    def get_by_id(self, gid, nid, id):
+        """
+        Get a command descriptor by an ID. So you can read command result later if the ID is known.
+        """
+        return BaseCmd(self._redis, id, gid, nid)
+
     def get_bound_client(self, gid, nid, default_args=None):
         return BoundClient(self, gid, nid, default_args)
 
     def get_cpu_info(self, gid, nid):
-        result = self.cmd(gid, nid, 'get_cpu_info', RunArgs()).get_result(GET_INFO_TIMEOUT)
+        result = self.cmd(gid, nid, CMD_GET_CPU_INFO, RunArgs()).get_result(GET_INFO_TIMEOUT)
         return json.loads(result['data'])
 
     def get_disk_info(self, gid, nid):
-        result = self.cmd(gid, nid, 'get_disk_info', RunArgs()).get_result(GET_INFO_TIMEOUT)
+        result = self.cmd(gid, nid, CMD_GET_DISK_INFO, RunArgs()).get_result(GET_INFO_TIMEOUT)
         return json.loads(result['data'])
 
     def get_mem_info(self, gid, nid):
-        result = self.cmd(gid, nid, 'get_mem_info', RunArgs()).get_result(GET_INFO_TIMEOUT)
+        result = self.cmd(gid, nid, CMD_GET_MEM_INFO, RunArgs()).get_result(GET_INFO_TIMEOUT)
         return json.loads(result['data'])
 
     def get_nic_info(self, gid, nid):
-        result = self.cmd(gid, nid, 'get_nic_info', RunArgs()).get_result(GET_INFO_TIMEOUT)
+        result = self.cmd(gid, nid, CMD_GET_NIC_INFO, RunArgs()).get_result(GET_INFO_TIMEOUT)
         return json.loads(result['data'])
 
     def get_os_info(self, gid, nid):
-        result = self.cmd(gid, nid, 'get_os_info', RunArgs()).get_result(GET_INFO_TIMEOUT)
+        result = self.cmd(gid, nid, CMD_GET_OS_INFO, RunArgs()).get_result(GET_INFO_TIMEOUT)
         return json.loads(result['data'])
