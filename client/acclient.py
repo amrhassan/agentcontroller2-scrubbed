@@ -14,9 +14,12 @@ CMD_GET_DISK_INFO = 'get_disk_info'
 CMD_GET_MEM_INFO = 'get_mem_info'
 
 
+LEVELS = range(13) + range(20, 24) + [30]
+
+
 class RunArgs(object):
     def __init__(self, domain=None, name=None, max_time=0, max_restart=0,
-                 recurring_period=0, stats_interval=0, args=None, loglevels=None,
+                 recurring_period=0, stats_interval=0, args=None, loglevels='*',
                  loglevels_db=None, loglevels_ac=None):
         # init defaults.
         self._domain = domain
@@ -26,9 +29,43 @@ class RunArgs(object):
         self._recurring_period = recurring_period
         self._stats_interval = stats_interval
         self._args = args
-        self._loglevels = loglevels
-        self._loglevels_db = loglevels_db
-        self._loglevels_ac = loglevels_ac
+        self._loglevels = self._expand(loglevels)
+        self._loglevels_db = self._expand(loglevels_db)
+        self._loglevels_ac = self._expand(loglevels_ac)
+
+    def _expand(self, l):
+        if l is None:
+            return
+
+        if isinstance(l, list):
+            # make sure only valid values are allowed
+            return list(set(l).intersection(LEVELS))
+        elif isinstance(l, basestring):
+            levels = set()
+            for part in l.split(','):
+                lower, _, upper = part.partition('-')
+                lower = lower.strip()
+                upper = upper.strip()
+
+                if lower == '*':
+                    levels.update(LEVELS)
+                    continue
+
+                assert lower.isdigit(), 'Value %s is not digit' % lower
+                lower = int(lower)
+
+                if upper:
+                    # range input
+                    assert upper.isdigit(), 'Upper bound %s is not digit' % upper
+                    upper = int(upper)
+                    if upper > 30:
+                        # trim limit
+                        upper = 30
+                    levels.update(range(lower, upper + 1))
+                    continue
+
+                levels.add(lower)
+            return list(levels.intersection(LEVELS))
 
     @property
     def domain(self):
@@ -100,6 +137,7 @@ class BaseCmd(object):
         self._id = id
         self._gid = gid
         self._nid = nid
+        self._result = None
 
     @property
     def id(self):
@@ -114,8 +152,11 @@ class BaseCmd(object):
         return self._nid
 
     def get_result(self, timeout=0):
-        queue, result = self._redis.blpop("cmds_queue_%s" % self.id, timeout)
-        return json.loads(result)
+        if self._result is None:
+            queue, result = self._redis.blpop("cmds_queue_%s" % self.id, timeout)
+            self._result = json.loads(result)
+
+        return self._result
 
     def kill(self):
         raise NotImplemented()
