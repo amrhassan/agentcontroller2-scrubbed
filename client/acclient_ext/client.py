@@ -2,12 +2,14 @@ import acclient
 
 
 class ACFactory(object):
-    def Client(self, address='localhost', port=9999, db=0):
+    def get(self, address='localhost', port=9999, db=0):
         return acclient.Client(address, port, db)
 
-    def RunArgs(self, domain=None, name=None, max_time=0, max_restart=0, recurring_period=0, stats_interval=0,
+    def runArgs(self, domain=None, name=None, max_time=0, max_restart=0, recurring_period=0, stats_interval=0,
                 args=None, loglevels='*', loglevels_db=None, loglevels_ac=None):
         """
+        Creates a reusable run arguments object
+
         :domain: Domain name
         :name: script or executable name
         :max_time: Max run time, 0 (forever), -1 forever but remember during reboots (long running),

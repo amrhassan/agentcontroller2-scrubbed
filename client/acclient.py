@@ -251,9 +251,9 @@ class Client(object):
     """
     Initialize the redis connection
     """
-    def __init__(self, address='localhost', port=6379, db=0):
+    def __init__(self, address='localhost', port=6379, password=None, db=0):
         # Initializing redis client
-        self._redis = redis.StrictRedis(host=address, port=port, db=db)
+        self._redis = redis.StrictRedis(host=address, port=port, password=password, db=db)
 
         # Check the connectivity
         self._redis.ping()
