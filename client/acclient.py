@@ -144,7 +144,8 @@ class RunArgs(object):
 
 
 class BaseCmd(object):
-    def __init__(self, redis_client, id, gid, nid):
+    def __init__(self, client, redis_client, id, gid, nid):
+        self._client = client
         self._redis = redis_client
         self._id = id
         self._gid = gid
@@ -171,15 +172,15 @@ class BaseCmd(object):
         return self._result
 
     def kill(self):
-        raise NotImplemented()
+        return self._client.cmd(self._gid, self._nid, 'kill', RunArgs(), {'id': self._id})
 
 
 class Cmd(BaseCmd):
-    def __init__(self, redis_client, id, gid, nid, cmd, run_args, data):
+    def __init__(self, client, redis_client, id, gid, nid, cmd, run_args, data):
         if not isinstance(run_args, RunArgs):
             raise ValueError('Invalid arguments')
 
-        super(Cmd, self).__init__(redis_client, id, gid, nid)
+        super(Cmd, self).__init__(client, redis_client, id, gid, nid)
         self._cmd = cmd
         self._args = run_args
         self._data = data
@@ -270,7 +271,7 @@ class Client(object):
         """
         cmd_id = id or str(uuid.uuid4())
 
-        cmd = Cmd(self._redis, cmd_id, gid, nid, cmd, args, data)
+        cmd = Cmd(self, self._redis, cmd_id, gid, nid, cmd, args, data)
 
         payload = json.dumps(cmd.dump())
         self._redis.lpush('cmds_queue', payload)
@@ -300,7 +301,7 @@ class Client(object):
         """
         Get a command descriptor by an ID. So you can read command result later if the ID is known.
         """
-        return BaseCmd(self._redis, id, gid, nid)
+        return BaseCmd(self, self._redis, id, gid, nid)
 
     def get_bound_client(self, gid, nid, default_args=None):
         return BoundClient(self, gid, nid, default_args)
