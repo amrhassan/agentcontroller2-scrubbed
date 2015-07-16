@@ -12,7 +12,7 @@ CMD_GET_NIC_INFO = 'get_nic_info'
 CMD_GET_OS_INFO = 'get_os_info'
 CMD_GET_DISK_INFO = 'get_disk_info'
 CMD_GET_MEM_INFO = 'get_mem_info'
-
+CMD_GET_PROCESSES_STATS = 'get_processes_stats'
 
 LEVELS = range(13) + range(20, 24) + [30]
 
@@ -233,19 +233,40 @@ class BoundClient(object):
                                     executable, cmdargs, args, data, id)
 
     def get_cpu_info(self):
+        """
+        Get CPU info of the agent node
+        """
         return self._client.get_cpu_info(self._gid, self._nid)
 
     def get_disk_info(self):
+        """
+        Get disk info of the agent node
+        """
         return self._client.get_disk_info(self._gid, self._nid)
 
     def get_mem_info(self):
+        """
+        Get MEM info of the agent node
+        """
         return self._client.get_mem_info(self._gid, self._nid)
 
     def get_nic_info(self):
+        """
+        Get NIC info of the agent node
+        """
         return self._client.get_nic_info(self._gid, self._nid)
 
     def get_os_info(self):
+        """
+        Get OS info of the agent node
+        """
         return self._client.get_os_info(self._gid, self._nid)
+
+    def get_processes(self, domain=None, name=None):
+        """
+        Get stats for all running process at the moment of the call, optionally filter with domain and/or name
+        """
+        return self._client.get_processes(self._gid, self._nid, domain, name)
 
 
 class Client(object):
@@ -304,24 +325,54 @@ class Client(object):
         return BaseCmd(self, self._redis, id, gid, nid)
 
     def get_bound_client(self, gid, nid, default_args=None):
+        """
+        Get a bound client to a specific gid and nid with optional default run arguments
+        """
         return BoundClient(self, gid, nid, default_args)
 
     def get_cpu_info(self, gid, nid):
+        """
+        Get CPU info of the agent node
+        """
         result = self.cmd(gid, nid, CMD_GET_CPU_INFO, RunArgs()).get_result(GET_INFO_TIMEOUT)
         return json.loads(result['data'])
 
     def get_disk_info(self, gid, nid):
+        """
+        Get disk info of the agent node
+        """
         result = self.cmd(gid, nid, CMD_GET_DISK_INFO, RunArgs()).get_result(GET_INFO_TIMEOUT)
         return json.loads(result['data'])
 
     def get_mem_info(self, gid, nid):
+        """
+        Get MEM info of the agent node
+        """
         result = self.cmd(gid, nid, CMD_GET_MEM_INFO, RunArgs()).get_result(GET_INFO_TIMEOUT)
         return json.loads(result['data'])
 
     def get_nic_info(self, gid, nid):
+        """
+        Get NIC info of the agent node
+        """
         result = self.cmd(gid, nid, CMD_GET_NIC_INFO, RunArgs()).get_result(GET_INFO_TIMEOUT)
         return json.loads(result['data'])
 
     def get_os_info(self, gid, nid):
+        """
+        Get OS info of the agent node
+        """
         result = self.cmd(gid, nid, CMD_GET_OS_INFO, RunArgs()).get_result(GET_INFO_TIMEOUT)
+        return json.loads(result['data'])
+
+    def get_processes(self, gid, nid, domain=None, name=None):
+        """
+        Get stats for all running process at the moment of the call, optionally filter with domain and/or name
+        """
+        data = {
+            'domain': domain,
+            'name': name
+        }
+
+        result = self.cmd(gid, nid, CMD_GET_PROCESSES_STATS, RunArgs(), data).get_result(GET_INFO_TIMEOUT)
         return json.loads(result['data'])
