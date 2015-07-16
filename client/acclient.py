@@ -174,6 +174,16 @@ class BaseCmd(object):
     def kill(self):
         return self._client.cmd(self._gid, self._nid, 'kill', RunArgs(), {'id': self._id})
 
+    def get_stats(self):
+        stats = self._client.cmd(self._gid, self._nid, 'get_process_stats',
+                                 RunArgs(), {'id': self._id}).get_result(GET_INFO_TIMEOUT)
+        if stats['state'] != 'SUCCESS':
+            raise Exception(stats['data'])
+
+        # TODO: parsing data should be always based on the level
+        result = json.loads(stats['data'])
+        return result
+
 
 class Cmd(BaseCmd):
     def __init__(self, client, redis_client, id, gid, nid, cmd, run_args, data):
