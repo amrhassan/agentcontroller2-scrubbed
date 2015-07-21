@@ -1,6 +1,16 @@
 # jsagentcontroller
 JumpScale Agentcontroller in Go
 
+# Installation
+```
+go get github.com/Jumpscale/jsagentcontroller
+```
+
+# Running jsagencontroller
+```
+go run main.go -c agentcontroller.go
+```
+
 # REST Service
 Note: GID, NID and JID is extracted from URL or from JSON body
 
