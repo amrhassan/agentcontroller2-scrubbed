@@ -13,8 +13,9 @@ CMD_GET_OS_INFO = 'get_os_info'
 CMD_GET_DISK_INFO = 'get_disk_info'
 CMD_GET_MEM_INFO = 'get_mem_info'
 CMD_GET_PROCESSES_STATS = 'get_processes_stats'
+CMD_GET_MSGS = 'get_msgs'
 
-LEVELS = range(13) + range(20, 24) + [30]
+LEVELS = range(1, 10) + range(20, 24) + [30]
 
 
 class RunArgs(object):
@@ -184,6 +185,9 @@ class BaseCmd(object):
         result = json.loads(stats['data'])
         return result
 
+    def get_msgs(self, levels='*', limit=20):
+        return self._client.get_msgs(self._gid, self._nid, jobid=self._id, levels=levels, limit=limit)
+
 
 class Cmd(BaseCmd):
     def __init__(self, client, redis_client, id, gid, nid, cmd, run_args, data):
@@ -277,6 +281,18 @@ class BoundClient(object):
         Get stats for all running process at the moment of the call, optionally filter with domain and/or name
         """
         return self._client.get_processes(self._gid, self._nid, domain, name)
+
+    def get_msgs(self, jobid=None, timefrom=None, timeto=None, levels='*', limit=20):
+        """
+        Query and return log messages stored on agent side.
+        :jobid: Optional jobid
+        :timefrom: Optional time from (unix timestamp in seconds)
+        :timeto: Optional time to (unix timestamp in seconds)
+        :levels: Levels to return (ex: 1,2,3 or 1,2,6-9 or * for all)
+        :limit: Max number of log messages to return. Note that the agent in anyways will not return
+            more than 1000 record
+        """
+        return self._client.get_msgs(self._gid, self._nid, jobid, timefrom, timeto, levels, limit)
 
 
 class Client(object):
@@ -385,4 +401,31 @@ class Client(object):
         }
 
         result = self.cmd(gid, nid, CMD_GET_PROCESSES_STATS, RunArgs(), data).get_result(GET_INFO_TIMEOUT)
+        return json.loads(result['data'])
+
+    def get_msgs(self, gid, nid, jobid=None, timefrom=None, timeto=None, levels='*', limit=20):
+        """
+        Query and return log messages stored on agent side.
+        :gid: Grid id
+        :nid: Node id
+        :jobid: Optional jobid
+        :timefrom: Optional time from (unix timestamp in seconds)
+        :timeto: Optional time to (unix timestamp in seconds)
+        :levels: Levels to return (ex: 1,2,3 or 1,2,6-9 or * for all)
+        :limit: Max number of log messages to return. Note that the agent in anyways will not return
+            more than 1000 record
+        """
+
+        query = {
+            'jobid': jobid,
+            'timefrom': timefrom,
+            'timeto': timeto,
+            'levels': levels,
+            'limit': limit
+        }
+
+        result = self.cmd(gid, nid, CMD_GET_MSGS, RunArgs(), query).get_result()
+        if result['state'] != 'SUCCESS':
+            raise Exception(result['data'])
+
         return json.loads(result['data'])
