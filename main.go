@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"log"
 	"fmt"
 	"flag"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"github.com/garyburd/redigo/redis"
 	"github.com/naoina/toml"
 	"encoding/json"
+	"os/exec"
 	"github.com/Jumpscale/jsagentcontroller/influxdb-client-0.8.8"
 )
 
@@ -25,6 +27,12 @@ type Settings struct {
 		Db string
 		User string
 		Password string
+	}
+
+	Handlers struct {
+		Binary string
+		Cwd string
+		Env []string
 	}
 }
 
@@ -56,6 +64,11 @@ type CommandMessage struct {
 type StatsRequest struct {
 	Timestamp int64             `json:"timestamp"`
 	Series    [][]interface{} `json:"series"`
+}
+
+type EvenRequest struct {
+	Name string `json:"name"`
+	Data string `json:"data"`
 }
 
 //
@@ -99,14 +112,14 @@ func cmdreader() {
 		//
 		command, err := redis.Strings(db.Do("BLPOP", "cmds_queue", "0"))
 
-		fmt.Println("[+] message from master redis queue")
+		log.Println("[+] message from master redis queue")
 
 		if err != nil {
-			fmt.Println("[-] pop error: ", err)
+			log.Println("[-] pop error: ", err)
 			continue
 		}
 
-		fmt.Println("[+] message payload: ", command[1])
+		log.Println("[+] message payload: ", command[1])
 
 		//
 		// parsing json data
@@ -115,12 +128,12 @@ func cmdreader() {
 		err = json.Unmarshal([]byte(command[1]), &payload)
 
 		if err != nil {
-			fmt.Println("[-] message decoding: ", err)
+			log.Println("[-] message decoding: ", err)
 			continue
 		}
 
 		id := fmt.Sprintf("%d:%d", payload.Gid, payload.Nid)
-		fmt.Printf("[+] message destination [%s]\n", id)
+		log.Printf("[+] message destination [%s]\n", id)
 
 
 		//
@@ -129,7 +142,7 @@ func cmdreader() {
 		_, err = db.Do("RPUSH", id, command[1])
 
 		if err != nil {
-			fmt.Println("[-] push error: ", err)
+			log.Println("[-] push error: ", err)
 		}
 	}
 }
@@ -141,7 +154,7 @@ func cmd(c *gin.Context) {
 	gid := c.Param("gid")
 	nid := c.Param("nid")
 
-	fmt.Printf("[+] gin: execute (gid: %s, nid: %s)\n", gid, nid)
+	log.Printf("[+] gin: execute (gid: %s, nid: %s)\n", gid, nid)
 
 	//
 	// New connection, checking this queue
@@ -150,7 +163,7 @@ func cmd(c *gin.Context) {
 		defer db.Close()
 
 	id := fmt.Sprintf("%s:%s", gid, nid)
-	fmt.Printf("[+] waiting data from [%s]\n", id)
+	log.Printf("[+] waiting data from [%s]\n", id)
 
 		pending, err := redis.Strings(db.Do("BLPOP", id, "0"))
 
@@ -163,7 +176,7 @@ func cmd(c *gin.Context) {
 		// extracting data from redis response
 		//
 		payload := pending[1]
-		fmt.Printf("[+] payload: %s\n", payload)
+		log.Printf("[+] payload: %s\n", payload)
 
 	//
 	// http reply
@@ -178,7 +191,7 @@ func logs(c *gin.Context) {
 	db := pool.Get()
 		defer db.Close()
 
-	fmt.Printf("[+] gin: log (gid: %s, nid: %s)\n", gid, nid)
+	log.Printf("[+] gin: log (gid: %s, nid: %s)\n", gid, nid)
 
 	//
 	// read body
@@ -186,7 +199,7 @@ func logs(c *gin.Context) {
 	content, err := ioutil.ReadAll(c.Request.Body)
 
 	if err != nil {
-		fmt.Println("[-] cannot read body:", err)
+		log.Println("[-] cannot read body:", err)
 		c.JSON(http.StatusInternalServerError, "error")
 		return
 	}
@@ -195,7 +208,7 @@ func logs(c *gin.Context) {
 	// push body to redis
 	//
 	id := fmt.Sprintf("%s:%s:log", gid, nid)
-	fmt.Printf("[+] message destination [%s]\n", id)
+	log.Printf("[+] message destination [%s]\n", id)
 
 	//
 	// push message to client queue
@@ -213,7 +226,7 @@ func result(c *gin.Context) {
 	db := pool.Get()
 		defer db.Close()
 
-	fmt.Printf("[+] gin: result (gid: %s, nid: %s)\n", gid, nid)
+	log.Printf("[+] gin: result (gid: %s, nid: %s)\n", gid, nid)
 
 	//
 	// read body
@@ -221,7 +234,7 @@ func result(c *gin.Context) {
 	content, err := ioutil.ReadAll(c.Request.Body)
 
 	if err != nil {
-		fmt.Println("[-] cannot read body:", err)
+		log.Println("[-] cannot read body:", err)
 		c.JSON(http.StatusInternalServerError, "body error")
 		return
 	}
@@ -233,17 +246,17 @@ func result(c *gin.Context) {
 	err = json.Unmarshal(content, &payload)
 
 	if err != nil {
-		fmt.Println("[-] cannot read json:", err)
+		log.Println("[-] cannot read json:", err)
 		c.JSON(http.StatusInternalServerError, "json error")
 		return
 	}
 
-	fmt.Printf("[+] payload: jobid: %d\n", payload.Id)
+	log.Printf("[+] payload: jobid: %d\n", payload.Id)
 
 	//
 	// push body to redis
 	//
-	fmt.Printf("[+] message destination [%s]\n", payload.Id)
+	log.Printf("[+] message destination [%s]\n", payload.Id)
 
 
 	//
@@ -259,7 +272,7 @@ func stats(c *gin.Context) {
 	gid := c.Param("gid")
 	nid := c.Param("nid")
 
-	fmt.Printf("[+] gin: stats (gid: %s, nid: %s)\n", gid, nid)
+	log.Printf("[+] gin: stats (gid: %s, nid: %s)\n", gid, nid)
 
 	//
 	// read body
@@ -267,7 +280,7 @@ func stats(c *gin.Context) {
 	content, err := ioutil.ReadAll(c.Request.Body)
 
 	if err != nil {
-		fmt.Println("[-] cannot read body:", err)
+		log.Println("[-] cannot read body:", err)
 		c.JSON(http.StatusInternalServerError, "body error")
 		return
 	}
@@ -279,7 +292,7 @@ func stats(c *gin.Context) {
 	err = json.Unmarshal(content, &payload)
 
 	if err != nil {
-		fmt.Println("[-] cannot read json:", err)
+		log.Println("[-] cannot read json:", err)
 		c.JSON(http.StatusInternalServerError, "json error")
 		return
 	}
@@ -295,7 +308,7 @@ func stats(c *gin.Context) {
 	})
 
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 	}
 
 	var timestamp = payload.Timestamp
@@ -316,11 +329,67 @@ func stats(c *gin.Context) {
 	}
 
 	if err := con.WriteSeries(seriesList); err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return
 	}
 
 	//
+	c.JSON(http.StatusOK, "ok")
+}
+
+func event(c *gin.Context) {
+	gid := c.Param("gid")
+	nid := c.Param("nid")
+
+	log.Printf("[+] gin: event (gid: %s, nid: %s)\n", gid, nid)
+
+	content, err := ioutil.ReadAll(c.Request.Body)
+
+	if err != nil {
+		log.Println("[-] cannot read body:", err)
+		c.JSON(http.StatusInternalServerError, "body error")
+		return
+	}
+
+	var payload EvenRequest
+	log.Printf("%s", content)
+	err = json.Unmarshal(content, &payload)
+	if err != nil {
+		log.Println(err)
+		c.JSON(http.StatusInternalServerError, "Error")
+	}
+
+	cmd := exec.Command(settings.Handlers.Binary,
+		fmt.Sprintf("%s.py", payload.Name), gid, nid)
+
+	cmd.Dir = settings.Handlers.Cwd
+	cmd.Env = settings.Handlers.Env
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		log.Println("Failed to open process stderr", err)
+	}
+
+	log.Println("Starting handler for", payload.Name, "event, for agent", gid, nid)
+	err = cmd.Start()
+	if err != nil {
+		log.Println(err)
+	} else {
+		go func(){
+			//wait for command to exit.
+			cmderrors, err := ioutil.ReadAll(stderr)
+			if len(cmderrors) > 0 {
+				log.Printf("%s(%s:%s): %s", payload.Name, gid, nid, cmderrors)
+			}
+
+			err = cmd.Wait()
+			if err != nil {
+				log.Println("Failed to handle ", payload.Name, " event for agent: ", gid, nid, err)
+			}
+		}()
+	}
+
+
 	c.JSON(http.StatusOK, "ok")
 }
 
@@ -335,7 +404,7 @@ func main() {
 	flag.Parse()
 
 	printHelp := func() {
-		fmt.Println("agentcontroller [options]")
+		log.Println("agentcontroller [options]")
 		flag.PrintDefaults()
 	}
 
@@ -345,15 +414,15 @@ func main() {
 	}
 
 	if cfg == "" {
-		fmt.Println("Missing required option -c")
+		log.Println("Missing required option -c")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
 
 	LoadTomlFile(cfg, &settings)
 
-	fmt.Printf("[+] webservice: <%s>\n", settings.Main.Listen)
-	fmt.Printf("[+] redis server: <%s>\n", settings.Main.RedisHost)
+	log.Printf("[+] webservice: <%s>\n", settings.Main.Listen)
+	log.Printf("[+] redis server: <%s>\n", settings.Main.RedisHost)
 
 	pool = newPool(settings.Main.RedisHost, settings.Main.RedisPassword)
 	router := gin.Default()
@@ -364,6 +433,7 @@ func main() {
 	router.POST("/:gid/:nid/log", logs)
 	router.POST("/:gid/:nid/result", result)
 	router.POST("/:gid/:nid/stats", stats)
+	router.POST("/:gid/:nid/event", event)
 	// router.Static("/doc", "./doc")
 
 	router.Run(settings.Main.Listen)

@@ -1,10 +1,15 @@
 [main]
-Listen = ":8966"
-RedisHost =  ":6379"
-RedisPassword = ""
+listen = ":8966"
+redis_host =  "172.17.42.1:6379"
+redis_password = ""
 
 [influxdb]
-Host = "172.17.0.1:8086"
-Db   = "agentcontroller"
-User = "ac"
-Password = "acctrl"
+host = "172.17.0.1:8086"
+db   = "agentcontroller"
+user = "ac"
+password = "acctrl"
+
+[handlers]
+binary = "python2.7"
+cwd = "./handlers"
+env = ["PYTHONPATH=../client"]

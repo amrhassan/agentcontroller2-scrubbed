@@ -149,8 +149,8 @@ class BaseCmd(object):
         self._client = client
         self._redis = redis_client
         self._id = id
-        self._gid = gid
-        self._nid = nid
+        self._gid = int(gid)
+        self._nid = int(nid)
         self._result = None
 
     @property
