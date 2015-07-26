@@ -12,4 +12,4 @@ password = "acctrl"
 [handlers]
 binary = "python2.7"
 cwd = "./handlers"
-env = ["PYTHONPATH=../client"]
+env = ["PYTHONPATH=/opt/jumpscale7/lib:../client"]

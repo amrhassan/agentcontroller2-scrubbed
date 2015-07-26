@@ -48,6 +48,7 @@ def startup(gid, nid):
     if not response.ok:
         raise Exception('Invalid response from syncthing', response.reason)
 
+    local_device_id = response.headers['x-syncthing-id']
     config = response.json()
 
     if api_key is None:
@@ -87,16 +88,27 @@ def startup(gid, nid):
         })
         dirty = True
 
-    if not dirty:
-        return
+    if dirty:
+        # apply changes
+        response = sessions.post(endpoint, data=json.dumps(config), headers=headers)
+        if not response.ok:
+            raise Exception('Failed to set syncthing configuration', response.reason)
 
-    response = sessions.post(endpoint, data=json.dumps(config), headers=headers)
-    if not response.ok:
-        raise Exception('Failed to set syncthing configuration', response.reason)
+        response = sessions.post(get_url(ENDPOINT_RESTART), headers=headers)
+        if not response.ok:
+            raise Exception('Failed to restart syncthing', get_url(ENDPOINT_RESTART), response.reason)
 
-    response = sessions.post(get_url(ENDPOINT_RESTART), headers=headers)
-    if not response.ok:
-        raise Exception('Failed to restart syncthing', get_url(ENDPOINT_RESTART), response.reason)
+    # Now, the syncthing on AC side knows about the syncthing on Agent side. Now we have
+    # to register this instance of syncthing on agent as well. We can do this via a simple agent command
+
+    data = {
+        'device_id': local_device_id,
+        'folder_id': syncthing['shared-folder-id']
+    }
+
+    result = client.cmd(gid, nid, 'sync', default.update({'name': 'sync_jumpscripts'}), data).get_result()
+    if result['state'] != 'SUCCESS':
+        raise Exception('Error syncthing jumpscripts folder on agent: %s' % result['data'])
 
 if __name__ == '__main__':
     utils.run(startup)
