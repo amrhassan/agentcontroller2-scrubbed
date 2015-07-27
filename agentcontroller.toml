@@ -1,10 +1,10 @@
 [main]
 listen = ":8966"
-redis_host =  "localhost:6379"
+redis_host =  "127.0.0.1:6379"
 redis_password = ""
 
 [influxdb]
-host = "localhost:8086"
+host = "127.0.0.1:8086"
 db   = "agentcontroller"
 user = "ac"
 password = "acctrl"
