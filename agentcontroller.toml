@@ -1,10 +1,10 @@
 [main]
 listen = ":8966"
-redis_host =  "172.17.42.1:6379"
+redis_host =  "localhost:6379"
 redis_password = ""
 
 [influxdb]
-host = "172.17.0.1:8086"
+host = "localhost:8086"
 db   = "agentcontroller"
 user = "ac"
 password = "acctrl"
@@ -12,4 +12,11 @@ password = "acctrl"
 [handlers]
 binary = "python2.7"
 cwd = "./handlers"
-env = ["PYTHONPATH=/opt/jumpscale7/lib:../client"]
+    [handlers.env]
+    PYTHONPATH = "/opt/jumpscale7/lib:../client"
+    SYNCTHING_URL = "http://localhost:8384/"
+    SYNCTHING_SHARED_FOLDER_ID = "jumpscripts"
+    #SYNCTHING_API_KEY = ""
+    REDIS_ADDRESS = "localhost"
+    REDIS_PORT = "6379"
+    #REDIS_PASSWORD = ""

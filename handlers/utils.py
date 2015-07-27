@@ -1,15 +1,16 @@
 import sys
+import os
 
 settings = {
     'syncthing': {
-        'url': 'http://localhost:8384/',
-        'api-key': None,
-        'shared-folder-id': 'jumpscripts',
+        'url': os.environ.get('SYNCTHING_URL', 'http://localhost:8384/'),
+        'api-key': os.environ.get('SYNCTHING_API_KEY', None),
+        'shared-folder-id': os.environ.get('SYNCTHING_SHARED_FOLDER_ID', 'jumpscripts'),
     },
     'redis': {
-        'address': '172.17.42.1',
-        'port': '6379',
-        'password': None
+        'address': os.environ.get('REDIS_ADDRESS', 'localhost'),
+        'port': os.environ.get('REDIS_PORT', '6379'),
+        'password': os.environ.get('REDIS_PASSWORD', None)
     }
 }
 

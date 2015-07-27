@@ -32,7 +32,7 @@ type Settings struct {
 	Handlers struct {
 		Binary string
 		Cwd string
-		Env []string
+		Env map[string]string
 	}
 }
 
@@ -363,7 +363,17 @@ func event(c *gin.Context) {
 		fmt.Sprintf("%s.py", payload.Name), gid, nid)
 
 	cmd.Dir = settings.Handlers.Cwd
-	cmd.Env = settings.Handlers.Env
+	//build env string
+	var env []string
+	if len(settings.Handlers.Env) > 0 {
+		env = make([]string, 0, len(settings.Handlers.Env))
+		for ek, ev := range settings.Handlers.Env {
+			env = append(env, fmt.Sprintf("%v=%v", ek, ev))
+		}
+
+	}
+
+	cmd.Env = env
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
