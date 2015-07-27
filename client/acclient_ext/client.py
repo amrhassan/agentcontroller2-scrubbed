@@ -1,4 +1,5 @@
 import acclient
+from .legacyclient import LegacyClient
 
 
 class ACFactory(object):
@@ -25,3 +26,6 @@ class ACFactory(object):
         return acclient.RunArgs(domain=domain, name=name, max_time=max_time, max_restart=max_restart,
                                 recurring_period=recurring_period, stats_interval=stats_interval, args=args,
                                 loglevels=loglevels, loglevels_db=loglevels_db, loglevels_ac=loglevels_ac)
+
+    def getLegacyClient(self, address='localhost', port=9999, password=None, db=0):
+        return LegacyClient(address, port, password, db)
