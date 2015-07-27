@@ -8,7 +8,7 @@ go get github.com/Jumpscale/jsagentcontroller
 
 # Running jsagencontroller
 ```
-go run main.go -c agentcontroller.go
+go run main.go -c agentcontroller.toml
 ```
 
 # REST Service
