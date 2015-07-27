@@ -321,7 +321,7 @@ class Client(object):
         cmd = Cmd(self, self._redis, cmd_id, gid, nid, cmd, args, data)
 
         payload = json.dumps(cmd.dump())
-        self._redis.lpush('cmds_queue', payload)
+        self._redis.rpush('cmds_queue', payload)
         return cmd
 
     def execute(self, gid, nid, executable, cmdargs=None, args=None, data=None, id=None):

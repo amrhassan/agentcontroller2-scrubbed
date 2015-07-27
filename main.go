@@ -151,13 +151,25 @@ func cmdreader() {
 // REST stuff
 //
 func cmd(c *gin.Context) {
+	ack := true
+	
 	gid := c.Param("gid")
 	nid := c.Param("nid")
 
 	log.Printf("[+] gin: execute (gid: %s, nid: %s)\n", gid, nid)
+	
+	//
+	// listen for http closing
+	//
+	notify := c.Writer.(http.CloseNotifier).CloseNotify()
+	
+	go func() {
+		<-notify
+		ack = false
+	}()
 
 	//
-	// New connection, checking this queue
+	// new connection, checking this queue
 	//
 	db := pool.Get()
 		defer db.Close()
@@ -172,12 +184,22 @@ func cmd(c *gin.Context) {
 		return
 	}
 
-		//
-		// extracting data from redis response
-		//
-		payload := pending[1]
-		log.Printf("[+] payload: %s\n", payload)
+	//
+	// extracting data from redis response
+	//
+	payload := pending[1]
+	log.Printf("[+] payload: %s\n", payload)
 
+	//
+        // checking if connection alive
+        //
+        if !ack {
+		// push request back on queue
+		fmt.Println("[-] connection is dead, replaying")
+		db.Do("LPUSH", "cmds_queue", payload)
+		return
+	}
+	
 	//
 	// http reply
 	//
