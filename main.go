@@ -5,6 +5,7 @@ import (
     "log"
     "fmt"
     "flag"
+    "time"
     "net/http"
     "io/ioutil"
     "github.com/gin-gonic/gin"
@@ -152,30 +153,38 @@ func cmd(c *gin.Context) {
         ack = false
     }()
 
-    // new connection, checking this queue
-    db := pool.Get()
-        defer db.Close()
-
     id := fmt.Sprintf("%s:%s", gid, nid)
     log.Printf("[+] waiting data from [%s]\n", id)
 
+    response := make(chan []string)
+
+    db := pool.Get()
+    defer db.Close()
+
+    go func() {
         pending, err := redis.Strings(db.Do("BLPOP", id, "0"))
-
         if err != nil {
-        c.JSON(http.StatusInternalServerError, "error")
-        return
-    }
+            return
+        }
+        response <- pending
+        close(response)
+    }()
 
-    // extracting data from redis response
-    payload := pending[1]
-    log.Printf("[+] payload: %s\n", payload)
+    var payload string
 
-    // checking if connection alive
-    if !ack {
-        // push request back on queue
-        fmt.Println("[-] connection is dead, replaying")
-        db.Do("LPUSH", "cmds_queue", payload)
-        return
+    select {
+        case pending := <- response:
+            // extracting data from redis response
+            payload = pending[1]
+            log.Printf("[+] payload: %s\n", payload)
+            // checking if connection alive
+            if !ack {
+                // push request back on queue
+                fmt.Println("[-] connection is dead, replaying")
+                db.Do("LPUSH", "cmds_queue", payload)
+            }
+        case <- time.After(120 * time.Second):
+            payload = ""
     }
 
     // http reply
