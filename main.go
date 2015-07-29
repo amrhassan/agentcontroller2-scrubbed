@@ -6,6 +6,7 @@ import (
     "fmt"
     "flag"
     "time"
+    "sync"
     "net/http"
     "io/ioutil"
     "github.com/gin-gonic/gin"
@@ -136,10 +137,55 @@ func cmdreader() {
     }
 }
 
+var producers map[string] chan chan string = make(map[string] chan chan string)
+var producersLock sync.Mutex
+
+/**
+Gets a chain for the caller to wait on, we return a chan chan string instead
+of chan string directly to make sure of the following:
+1- The redis pop loop will not try to pop jobs out of the queue until there is a caller waiting
+   for new commands
+2- Prevent multiple clients polling on a single gid:nid at the same time.
+*/
+func getProducerChan(gid string, nid string) <- chan chan string {
+    key := fmt.Sprintf("%s:%s", gid, nid)
+
+    producersLock.Lock()
+    producer, ok := producers[key]
+    if !ok {
+        //start routine for this agent.
+        producer = make(chan chan string)
+        producers[key] = producer
+        go func() {
+            db := pool.Get()
+            defer db.Close()
+
+            for {
+                msgChan := make(chan string)
+                producer <- msgChan
+
+                pending, err := redis.Strings(db.Do("BLPOP", key, "0"))
+                if err != nil {
+                    return
+                }
+
+                select {
+                    case msgChan <- pending[1]:
+                        continue
+                    default:
+                        //caller didn't want to receive this command. have to repush it
+                        db.Do("LPUSH", "cmds_queue", pending[1])
+                }
+            }
+        }()
+    }
+    producersLock.Unlock()
+
+    return producer
+}
+
 // REST stuff
 func cmd(c *gin.Context) {
-    ack := true
-
     gid := c.Param("gid")
     nid := c.Param("nid")
 
@@ -148,46 +194,28 @@ func cmd(c *gin.Context) {
     // listen for http closing
     notify := c.Writer.(http.CloseNotifier).CloseNotify()
 
-    go func() {
-        <-notify
-        ack = false
-    }()
+    timeout := 60 * time.Second
 
-    id := fmt.Sprintf("%s:%s", gid, nid)
-    log.Printf("[+] waiting data from [%s]\n", id)
+    producer := getProducerChan(gid, nid)
+    var msgChan chan string
 
-    response := make(chan []string)
+    select {
+    case msgChan = <- producer:
+    case <- time.After(timeout):
+        c.String(http.StatusOK, "")
+        return
+    }
 
-    db := pool.Get()
-    defer db.Close()
-
-    go func() {
-        pending, err := redis.Strings(db.Do("BLPOP", id, "0"))
-        if err != nil {
-            return
-        }
-        response <- pending
-        close(response)
-    }()
+    //at this point we are sure this is the ONLY agent polling on /gid/nid/cmd
 
     var payload string
 
     select {
-        case pending := <- response:
-            // extracting data from redis response
-            payload = pending[1]
-            log.Printf("[+] payload: %s\n", payload)
-            // checking if connection alive
-            if !ack {
-                // push request back on queue
-                fmt.Println("[-] connection is dead, replaying")
-                db.Do("LPUSH", "cmds_queue", payload)
-            }
-        case <- time.After(120 * time.Second):
-            payload = ""
+    case payload = <- msgChan:
+    case <- notify:
+    case <- time.After(timeout):
     }
 
-    // http reply
     c.String(http.StatusOK, payload)
 }
 
