@@ -171,11 +171,12 @@ func getProducerChan(gid string, nid string) <- chan chan string {
 
                 select {
                     case msgChan <- pending[1]:
-                        continue
                     default:
                         //caller didn't want to receive this command. have to repush it
                         db.Do("LPUSH", "cmds_queue", pending[1])
                 }
+
+                close(msgChan)
             }
         }()
     }
