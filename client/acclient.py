@@ -21,7 +21,7 @@ LEVELS = range(1, 10) + range(20, 24) + [30]
 class RunArgs(object):
     def __init__(self, domain=None, name=None, max_time=0, max_restart=0,
                  recurring_period=0, stats_interval=0, args=None, loglevels='*',
-                 loglevels_db=None, loglevels_ac=None):
+                 loglevels_db=None, loglevels_ac=None, queue=None):
         """
         :domain: Domain name
         :name: script or executable name
@@ -34,6 +34,8 @@ class RunArgs(object):
         :loglevels: Which log levels to capture and pass to logger
         :loglevels_db: Which log levels to store in DB (overrides logger defaults)
         :loglevels_ac: Which log levels to send to AC (overrides logger defaults)
+        :queue: Name of the command queue to wait on.
+            This job will not get executed until no other commands running on the same queue.
         """
         self._domain = domain
         self._name = name
@@ -45,6 +47,7 @@ class RunArgs(object):
         self._loglevels = self._expand(loglevels)
         self._loglevels_db = self._expand(loglevels_db)
         self._loglevels_ac = self._expand(loglevels_ac)
+        self._queue = queue
 
     def _expand(self, l):
         if l is None:
@@ -120,10 +123,14 @@ class RunArgs(object):
     def loglevels_db(self):
         return self._loglevels_db or []
 
+    @property
+    def queue(self):
+        return self._queue
+
     def dump(self):
         dump = {}
         for key in ('domain', 'name', 'max_time', 'max_restart', 'recurring_period',
-                    'stats_interval', 'args', 'loglevels', 'loglevels_db', 'loglevels_ac'):
+                    'stats_interval', 'args', 'loglevels', 'loglevels_db', 'loglevels_ac', 'queue'):
             value = getattr(self, key)
             if value:
                 dump[key] = value
