@@ -246,6 +246,19 @@ class BoundClient(object):
         return self._client.execute(self._gid, self._nid,
                                     executable, cmdargs, args, data, id)
 
+    def execute_js_py(self, domain, name, data=None, args=None):
+        """
+        Executes jumpscale script (py) on agent. The execute_js_py extension must be
+        enabled and configured correctly on the agent.
+
+        :domain: Domain of script
+        :name: Name of script
+        :data: Data object (any json serializabl struct) that will be sent to the script.
+        :args: Optional run arguments
+        """
+        args = self._get_args(args)
+        return self._client.execute_js_py(self._gid, self._nid, domain, name, data, args)
+
     def get_cpu_info(self):
         """
         Get CPU info of the agent node
@@ -338,11 +351,24 @@ class Client(object):
         if cmdargs is not None and not isinstance(cmdargs, list):
             raise ValueError('cmdargs must be a list')
 
-        run_args = RunArgs(name=executable, args=cmdargs)
-        if args is not None:
-            run_args = args.update(run_args)
+        args = RunArgs().update(args).update({'name': executable, 'args': cmdargs})
 
-        return self.cmd(gid, nid, CMD_EXECUTE, run_args, data, id)
+        return self.cmd(gid, nid, CMD_EXECUTE, args, data, id)
+
+    def execute_js_py(self, gid, nid, domain, name, data=None, args=None):
+        """
+        Executes jumpscale script (py) on agent. The execute_js_py extension must be
+        enabled and configured correctly on the agent.
+
+        :gid: Grid id
+        :nid: Node id
+        :domain: Domain of script
+        :name: Name of script
+        :data: Data object (any json serializabl struct) that will be sent to the script.
+        :args: Optional run arguments
+        """
+        args = RunArgs().update(args).update({'domain': domain, 'name': name})
+        return self.cmd(gid, nid, CMD_EXECUTE_JS_PY, args, data)
 
     def get_by_id(self, gid, nid, id):
         """
