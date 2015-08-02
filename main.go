@@ -14,7 +14,7 @@ import (
     "github.com/naoina/toml"
     "encoding/json"
     "os/exec"
-    hubble "git.aydo.com/0-complexity/hubble/proxy"
+    hubble "github.com/Jumpscale/hubble/proxy"
     "github.com/Jumpscale/jsagentcontroller/influxdb-client-0.8.8"
 )
 
