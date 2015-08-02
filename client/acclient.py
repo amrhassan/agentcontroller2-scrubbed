@@ -13,6 +13,9 @@ CMD_GET_OS_INFO = 'get_os_info'
 CMD_GET_DISK_INFO = 'get_disk_info'
 CMD_GET_MEM_INFO = 'get_mem_info'
 CMD_GET_PROCESSES_STATS = 'get_processes_stats'
+CMD_TUNNEL_OPEN = 'hubble_open_tunnel'
+CMD_TUNNEL_CLOSE = 'hubble_close_tunnel'
+CMD_TUNNEL_LIST = 'hubble_list_tunnels'
 CMD_GET_MSGS = 'get_msgs'
 
 LEVELS = range(1, 10) + range(20, 24) + [30]
@@ -229,92 +232,6 @@ class Cmd(BaseCmd):
         }
 
 
-class BoundClient(object):
-    def __init__(self, client, gid, nid, default_args):
-        self._client = client
-        self._gid = gid
-        self._nid = nid
-        self._default_args = default_args
-
-    def _get_args(self, args):
-        if self._default_args is not None:
-            return self._default_args.update(args)
-        return args
-
-    def cmd(self, cmd, args, data, id=None):
-        args = self._get_args(args)
-        return self._client.cmd(self._gid, self._nid, cmd, args, data, id=None)
-
-    def get_by_id(self, id):
-        return self._client.get_by_id(self._gid, self._nid, id)
-
-    def execute(self, executable, cmdargs=None, args=None, data=None, id=None):
-        args = self._get_args(args)
-        return self._client.execute(self._gid, self._nid,
-                                    executable, cmdargs, args, data, id)
-
-    def execute_js_py(self, domain, name, data=None, args=None):
-        """
-        Executes jumpscale script (py) on agent. The execute_js_py extension must be
-        enabled and configured correctly on the agent.
-
-        :domain: Domain of script
-        :name: Name of script
-        :data: Data object (any json serializabl struct) that will be sent to the script.
-        :args: Optional run arguments
-        """
-        args = self._get_args(args)
-        return self._client.execute_js_py(self._gid, self._nid, domain, name, data, args)
-
-    def get_cpu_info(self):
-        """
-        Get CPU info of the agent node
-        """
-        return self._client.get_cpu_info(self._gid, self._nid)
-
-    def get_disk_info(self):
-        """
-        Get disk info of the agent node
-        """
-        return self._client.get_disk_info(self._gid, self._nid)
-
-    def get_mem_info(self):
-        """
-        Get MEM info of the agent node
-        """
-        return self._client.get_mem_info(self._gid, self._nid)
-
-    def get_nic_info(self):
-        """
-        Get NIC info of the agent node
-        """
-        return self._client.get_nic_info(self._gid, self._nid)
-
-    def get_os_info(self):
-        """
-        Get OS info of the agent node
-        """
-        return self._client.get_os_info(self._gid, self._nid)
-
-    def get_processes(self, domain=None, name=None):
-        """
-        Get stats for all running process at the moment of the call, optionally filter with domain and/or name
-        """
-        return self._client.get_processes(self._gid, self._nid, domain, name)
-
-    def get_msgs(self, jobid=None, timefrom=None, timeto=None, levels='*', limit=20):
-        """
-        Query and return log messages stored on agent side.
-        :jobid: Optional jobid
-        :timefrom: Optional time from (unix timestamp in seconds)
-        :timeto: Optional time to (unix timestamp in seconds)
-        :levels: Levels to return (ex: 1,2,3 or 1,2,6-9 or * for all)
-        :limit: Max number of log messages to return. Note that the agent in anyways will not return
-            more than 1000 record
-        """
-        return self._client.get_msgs(self._gid, self._nid, jobid, timefrom, timeto, levels, limit)
-
-
 class Client(object):
     """
     Initialize the redis connection
@@ -382,12 +299,6 @@ class Client(object):
         Get a command descriptor by an ID. So you can read command result later if the ID is known.
         """
         return BaseCmd(self, self._redis, id, gid, nid)
-
-    def get_bound_client(self, gid, nid, default_args=None):
-        """
-        Get a bound client to a specific gid and nid with optional default run arguments
-        """
-        return BoundClient(self, gid, nid, default_args)
 
     def get_cpu_info(self, gid, nid):
         """
@@ -458,6 +369,68 @@ class Client(object):
         }
 
         result = self.cmd(gid, nid, CMD_GET_MSGS, RunArgs(), query).get_result()
+        if result['state'] != 'SUCCESS':
+            raise Exception(result['data'])
+
+        return json.loads(result['data'])
+
+    def tunnel_open(self, gid, nid, local, gateway, ip, remote):
+        """
+        Opens a secure tunnel that accepts connection at the agent's local port `local`
+        and forwards the received connections to remote agent `gateway` which will
+        forward the tunnel connection to `ip:remote`
+
+        Note: The agent will proxy the connection over the agent-controller it recieved this open command from.
+
+        :gid: Grid id
+        :nid: Node id
+        :local: Agent's local listening port for the tunnel. 0 for dynamic allocation
+        :gateway: The other endpoint `agent` which the connection will be redirected to.
+            This should be the name of the hubble agent.
+            NOTE: if the endpoint is another superangent, it automatically names itself as '<gid>.<nid>'
+        :ip: The endpoint ip address on the remote agent network. Note that IP must be a real ip not a host name
+            dns names lookup is not supported.
+        :remote: The endpoint port on the remote agent network
+        """
+
+        request = {
+            'local': int(local),
+            'gateway': gateway,
+            'ip': ip,
+            'remote': int(remote)
+        }
+
+        result = self.cmd(gid, nid, CMD_TUNNEL_OPEN, RunArgs(), request).get_result(GET_INFO_TIMEOUT)
+        if result['state'] != 'SUCCESS':
+            raise Exception(result['data'])
+
+        return json.loads(result['data'])
+
+    def tunnel_close(self, gid, nid, local, gateway, ip, remote):
+        """
+        Closes a tunnel previously opened by tunnel_open. The `local` port MUST match the
+        real open port returned by the tunnel_open function. Otherwise the agent will not match the tunnel and return
+        ignore your call.
+
+        Note: closing a non-existing tunnel is not an error.
+        """
+        request = {
+            'local': int(local),
+            'gateway': gateway,
+            'ip': ip,
+            'remote': int(remote)
+        }
+
+        result = self.cmd(gid, nid, CMD_TUNNEL_CLOSE, RunArgs(), request).get_result(GET_INFO_TIMEOUT)
+        if result['state'] != 'SUCCESS':
+            raise Exception(result['data'])
+
+    def tunnel_list(self, gid, nid):
+        """
+        Return all opened connection that are open from the agent over the agent-controller it
+        received this command from
+        """
+        result = self.cmd(gid, nid, CMD_TUNNEL_LIST, RunArgs()).get_result(GET_INFO_TIMEOUT)
         if result['state'] != 'SUCCESS':
             raise Exception(result['data'])
 
