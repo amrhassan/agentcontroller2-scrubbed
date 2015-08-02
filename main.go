@@ -14,6 +14,7 @@ import (
     "github.com/naoina/toml"
     "encoding/json"
     "os/exec"
+    hubble "git.aydo.com/0-complexity/hubble/proxy"
     "github.com/Jumpscale/jsagentcontroller/influxdb-client-0.8.8"
 )
 
@@ -416,6 +417,10 @@ func event(c *gin.Context) {
     c.JSON(http.StatusOK, "ok")
 }
 
+func hubbleProxy(context *gin.Context) {
+    hubble.ProxyHandler(context.Writer, context.Request)
+}
+
 var settings Settings
 
 func main() {
@@ -452,11 +457,13 @@ func main() {
 
     go cmdreader()
 
+
     router.GET("/:gid/:nid/cmd", cmd)
     router.POST("/:gid/:nid/log", logs)
     router.POST("/:gid/:nid/result", result)
     router.POST("/:gid/:nid/stats", stats)
     router.POST("/:gid/:nid/event", event)
+    router.GET("/:gid/:nid/hubble", hubbleProxy)
     // router.Static("/doc", "./doc")
 
     router.Run(settings.Main.Listen)
