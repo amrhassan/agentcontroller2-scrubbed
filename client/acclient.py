@@ -159,8 +159,8 @@ class BaseCmd(object):
         self._client = client
         self._redis = redis_client
         self._id = id
-        self._gid = int(gid)
-        self._nid = int(nid)
+        self._gid = 0 if gid is None else int(gid)
+        self._nid = 0 if nid is None else int(nid)
         self._result = None
 
     @property
@@ -200,14 +200,18 @@ class BaseCmd(object):
 
 
 class Cmd(BaseCmd):
-    def __init__(self, client, redis_client, id, gid, nid, cmd, run_args, data):
+    def __init__(self, client, redis_client, id, gid, nid, cmd, run_args, data, role):
         if not isinstance(run_args, RunArgs):
             raise ValueError('Invalid arguments')
+
+        if role is not None and (gid, nid) != (None, None):
+            raise ValueError('Role is mutual exclusive with gid/nid')
 
         super(Cmd, self).__init__(client, redis_client, id, gid, nid)
         self._cmd = cmd
         self._args = run_args
         self._data = data
+        self._role = role
 
     @property
     def cmd(self):
@@ -221,11 +225,16 @@ class Cmd(BaseCmd):
     def data(self):
         return self._data
 
+    @property
+    def role(self):
+        return self._role
+
     def dump(self):
         return {
             'id': self.id,
             'gid': self.gid,
             'nid': self.nid,
+            'role': self.role,
             'cmd': self.cmd,
             'args': self.args.dump(),
             'data': json.dumps(self.data) if self.data is not None else ''
@@ -243,7 +252,7 @@ class Client(object):
         # Check the connectivity
         self._redis.ping()
 
-    def cmd(self, gid, nid, cmd, args, data=None, id=None):
+    def cmd(self, gid, nid, cmd, args, data=None, id=None, role=None):
         """
         Executes a command, return a cmd descriptor
         :gid: grid id
@@ -252,16 +261,18 @@ class Client(object):
         :args: instance of RunArgs
         :data: Raw data to send to the command standard input. Passed as objecte and will be dumped as json on wire
         :id: id of command for retrieve later, if None a random GUID will be generated.
+        :role: Optional role, only agents that satisfy this role can process this job. This is mutual exclusive with
+            gid/nid compo in that case, the gid/nid values must be None or a ValueError will be raised.
         """
         cmd_id = id or str(uuid.uuid4())
 
-        cmd = Cmd(self, self._redis, cmd_id, gid, nid, cmd, args, data)
+        cmd = Cmd(self, self._redis, cmd_id, gid, nid, cmd, args, data, role)
 
         payload = json.dumps(cmd.dump())
         self._redis.rpush('cmds_queue', payload)
         return cmd
 
-    def execute(self, gid, nid, executable, cmdargs=None, args=None, data=None, id=None):
+    def execute(self, gid, nid, executable, cmdargs=None, args=None, data=None, id=None, role=None):
         """
         Short cut for cmd.execute
         :gid: grid id
@@ -271,15 +282,17 @@ class Client(object):
         :args: Optional RunArgs
         :data: Raw data to the command stdin. (see cmd)
         :id: Optional command id (see cmd)
+        :role: Optional role, only agents that satisfy this role can process this job. This is mutual exclusive with
+            gid/nid compo in that case, the gid/nid values must be None or a ValueError will be raised.
         """
         if cmdargs is not None and not isinstance(cmdargs, list):
             raise ValueError('cmdargs must be a list')
 
         args = RunArgs().update(args).update({'name': executable, 'args': cmdargs})
 
-        return self.cmd(gid, nid, CMD_EXECUTE, args, data, id)
+        return self.cmd(gid, nid, CMD_EXECUTE, args, data, id, role)
 
-    def execute_js_py(self, gid, nid, domain, name, data=None, args=None):
+    def execute_js_py(self, gid, nid, domain, name, data=None, args=None, role=None):
         """
         Executes jumpscale script (py) on agent. The execute_js_py extension must be
         enabled and configured correctly on the agent.
@@ -292,7 +305,7 @@ class Client(object):
         :args: Optional run arguments
         """
         args = RunArgs().update(args).update({'domain': domain, 'name': name})
-        return self.cmd(gid, nid, CMD_EXECUTE_JS_PY, args, data)
+        return self.cmd(gid, nid, CMD_EXECUTE_JS_PY, args, data, role=role)
 
     def get_by_id(self, gid, nid, id):
         """

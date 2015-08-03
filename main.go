@@ -60,6 +60,7 @@ type CommandMessage struct {
     Id   string  `json:"id"`
     Gid  int     `json:"gid"`
     Nid  int     `json:"nid"`
+    Role string  `json:"role"`
 }
 
 type StatsRequest struct {
@@ -125,9 +126,17 @@ func cmdreader() {
             continue
         }
 
-        id := fmt.Sprintf("%d:%d", payload.Gid, payload.Nid)
-        log.Printf("[+] message destination [%s]\n", id)
+        //sort command to the consumer queue.
+        //either by role or by the gid/nid.
+        var id string
+        if payload.Role != "" {
+            //command has a given role
+            id = fmt.Sprintf("cmds_queue_%s", payload.Role)
+        } else {
+            id = fmt.Sprintf("%d:%d", payload.Gid, payload.Nid)
+        }
 
+        log.Printf("[+] message destination [%s]\n", id)
 
         // push message to client queue
         _, err = db.Do("RPUSH", id, command[1])
@@ -138,7 +147,7 @@ func cmdreader() {
     }
 }
 
-var producers map[string] chan chan string = make(map[string] chan chan string)
+var producers map[string] chan *PollData = make(map[string] chan *PollData)
 var producersLock sync.Mutex
 
 /**
@@ -148,24 +157,39 @@ of chan string directly to make sure of the following:
    for new commands
 2- Prevent multiple clients polling on a single gid:nid at the same time.
 */
-func getProducerChan(gid string, nid string) <- chan chan string {
+type PollData struct {
+    Roles []string
+    MsgChan chan string
+}
+
+func getProducerChan(gid string, nid string) chan <- *PollData {
     key := fmt.Sprintf("%s:%s", gid, nid)
 
     producersLock.Lock()
     producer, ok := producers[key]
     if !ok {
         //start routine for this agent.
-        producer = make(chan chan string)
+        producer = make(chan *PollData)
         producers[key] = producer
         go func() {
             db := pool.Get()
             defer db.Close()
 
             for {
-                msgChan := make(chan string)
-                producer <- msgChan
+                data := <- producer
 
-                pending, err := redis.Strings(db.Do("BLPOP", key, "0"))
+                msgChan := data.MsgChan
+                roles := data.Roles
+                roles_keys := make([]interface{}, 1, len(roles) + 2)
+                roles_keys[0] = key
+
+                for _, role := range roles {
+                    roles_keys = append(roles_keys, fmt.Sprintf("cmds_queue_%s", role))
+                }
+
+                roles_keys = append(roles_keys, "0")
+
+                pending, err := redis.Strings(db.Do("BLPOP", roles_keys...))
                 if err != nil {
                     return
                 }
@@ -177,7 +201,7 @@ func getProducerChan(gid string, nid string) <- chan chan string {
                         db.Do("LPUSH", "cmds_queue", pending[1])
                 }
 
-                close(msgChan)
+                close(data.MsgChan)
             }
         }()
     }
@@ -191,6 +215,8 @@ func cmd(c *gin.Context) {
     gid := c.Param("gid")
     nid := c.Param("nid")
 
+    query := c.Request.URL.Query()
+    roles := query["role"]
     log.Printf("[+] gin: execute (gid: %s, nid: %s)\n", gid, nid)
 
     // listen for http closing
@@ -199,21 +225,24 @@ func cmd(c *gin.Context) {
     timeout := 60 * time.Second
 
     producer := getProducerChan(gid, nid)
-    var msgChan chan string
+
+    data := &PollData{
+        Roles: roles,
+        MsgChan: make(chan string),
+    }
 
     select {
-    case msgChan = <- producer:
+    case producer <- data:
     case <- time.After(timeout):
         c.String(http.StatusOK, "")
         return
     }
-
     //at this point we are sure this is the ONLY agent polling on /gid/nid/cmd
 
     var payload string
 
     select {
-    case payload = <- msgChan:
+    case payload = <- data.MsgChan:
     case <- notify:
     case <- time.After(timeout):
     }
