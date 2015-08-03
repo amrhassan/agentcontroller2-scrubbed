@@ -1,153 +1,153 @@
 package main
 
 import (
-    "os"
-    "log"
-    "fmt"
-    "flag"
-    "time"
-    "sync"
-    "net/http"
-    "io/ioutil"
-    "github.com/gin-gonic/gin"
-    "github.com/garyburd/redigo/redis"
-    "github.com/naoina/toml"
-    "encoding/json"
-    "os/exec"
-    hubble "github.com/Jumpscale/hubble/proxy"
-    "github.com/Jumpscale/jsagentcontroller/influxdb-client-0.8.8"
+	"encoding/json"
+	"flag"
+	"fmt"
+	hubble "github.com/Jumpscale/hubble/proxy"
+	"github.com/Jumpscale/jsagentcontroller/influxdb-client-0.8.8"
+	"github.com/garyburd/redigo/redis"
+	"github.com/gin-gonic/gin"
+	"github.com/naoina/toml"
+	"io/ioutil"
+	"log"
+	"net/http"
+	"os"
+	"os/exec"
+	"sync"
+	"time"
 )
 
 type Settings struct {
-    Main struct {
-        Listen string
-        RedisHost string
-        RedisPassword string
-    }
+	Main struct {
+		Listen        string
+		RedisHost     string
+		RedisPassword string
+	}
 
-    Influxdb struct {
-        Host string
-        Db string
-        User string
-        Password string
-    }
+	Influxdb struct {
+		Host     string
+		Db       string
+		User     string
+		Password string
+	}
 
-    Handlers struct {
-        Binary string
-        Cwd string
-        Env map[string]string
-    }
+	Handlers struct {
+		Binary string
+		Cwd    string
+		Env    map[string]string
+	}
 }
 
 //LoadTomlFile loads toml using "github.com/naoina/toml"
 func LoadTomlFile(filename string, v interface{}) {
-    f, err := os.Open(filename)
-    if err != nil {
-        panic(err)
-    }
-    defer f.Close()
-    buf, err := ioutil.ReadAll(f)
-    if err != nil {
-        panic(err)
-    }
-    if err := toml.Unmarshal(buf, v); err != nil {
-        panic(err)
-    }
+	f, err := os.Open(filename)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	buf, err := ioutil.ReadAll(f)
+	if err != nil {
+		panic(err)
+	}
+	if err := toml.Unmarshal(buf, v); err != nil {
+		panic(err)
+	}
 }
 
 // data types
 type CommandMessage struct {
-    Id   string  `json:"id"`
-    Gid  int     `json:"gid"`
-    Nid  int     `json:"nid"`
-    Role string  `json:"role"`
+	Id   string `json:"id"`
+	Gid  int    `json:"gid"`
+	Nid  int    `json:"nid"`
+	Role string `json:"role"`
 }
 
 type StatsRequest struct {
-    Timestamp int64             `json:"timestamp"`
-    Series    [][]interface{} `json:"series"`
+	Timestamp int64           `json:"timestamp"`
+	Series    [][]interface{} `json:"series"`
 }
 
 type EvenRequest struct {
-    Name string `json:"name"`
-    Data string `json:"data"`
+	Name string `json:"name"`
+	Data string `json:"data"`
 }
 
 // redis stuff
 func newPool(addr string, password string) *redis.Pool {
-    return &redis.Pool {
-        MaxIdle: 80,
-        MaxActive: 12000,
-        Dial: func() (redis.Conn, error) {
-            c, err := redis.Dial("tcp", addr)
+	return &redis.Pool{
+		MaxIdle:   80,
+		MaxActive: 12000,
+		Dial: func() (redis.Conn, error) {
+			c, err := redis.Dial("tcp", addr)
 
-            if err != nil {
-                panic(err.Error())
-            }
+			if err != nil {
+				panic(err.Error())
+			}
 
-            if password != "" {
-                if _, err := c.Do("AUTH", password); err != nil {
-                    c.Close()
-                    return nil, err
-                }
-            }
+			if password != "" {
+				if _, err := c.Do("AUTH", password); err != nil {
+					c.Close()
+					return nil, err
+				}
+			}
 
-            return c, err
-        },
-    }
+			return c, err
+		},
+	}
 }
 
 var pool *redis.Pool
 
 // Command Reader
 func cmdreader() {
-    db := pool.Get()
-        defer db.Close()
+	db := pool.Get()
+	defer db.Close()
 
-    for {
-        // waiting message from master queue
-        command, err := redis.Strings(db.Do("BLPOP", "cmds_queue", "0"))
+	for {
+		// waiting message from master queue
+		command, err := redis.Strings(db.Do("BLPOP", "cmds_queue", "0"))
 
-        log.Println("[+] message from master redis queue")
+		log.Println("[+] message from master redis queue")
 
-        if err != nil {
-            log.Println("[-] pop error: ", err)
-            continue
-        }
+		if err != nil {
+			log.Println("[-] pop error: ", err)
+			continue
+		}
 
-        log.Println("[+] message payload: ", command[1])
+		log.Println("[+] message payload: ", command[1])
 
-        // parsing json data
-        var payload CommandMessage
-        err = json.Unmarshal([]byte(command[1]), &payload)
+		// parsing json data
+		var payload CommandMessage
+		err = json.Unmarshal([]byte(command[1]), &payload)
 
-        if err != nil {
-            log.Println("[-] message decoding: ", err)
-            continue
-        }
+		if err != nil {
+			log.Println("[-] message decoding: ", err)
+			continue
+		}
 
-        //sort command to the consumer queue.
-        //either by role or by the gid/nid.
-        var id string
-        if payload.Role != "" {
-            //command has a given role
-            id = fmt.Sprintf("cmds_queue_%s", payload.Role)
-        } else {
-            id = fmt.Sprintf("%d:%d", payload.Gid, payload.Nid)
-        }
+		//sort command to the consumer queue.
+		//either by role or by the gid/nid.
+		var id string
+		if payload.Role != "" {
+			//command has a given role
+			id = fmt.Sprintf("cmds_queue_%s", payload.Role)
+		} else {
+			id = fmt.Sprintf("%d:%d", payload.Gid, payload.Nid)
+		}
 
-        log.Printf("[+] message destination [%s]\n", id)
+		log.Printf("[+] message destination [%s]\n", id)
 
-        // push message to client queue
-        _, err = db.Do("RPUSH", id, command[1])
+		// push message to client queue
+		_, err = db.Do("RPUSH", id, command[1])
 
-        if err != nil {
-            log.Println("[-] push error: ", err)
-        }
-    }
+		if err != nil {
+			log.Println("[-] push error: ", err)
+		}
+	}
 }
 
-var producers map[string] chan *PollData = make(map[string] chan *PollData)
+var producers map[string]chan *PollData = make(map[string]chan *PollData)
 var producersLock sync.Mutex
 
 /**
@@ -158,342 +158,339 @@ of chan string directly to make sure of the following:
 2- Prevent multiple clients polling on a single gid:nid at the same time.
 */
 type PollData struct {
-    Roles []string
-    MsgChan chan string
+	Roles   []string
+	MsgChan chan string
 }
 
-func getProducerChan(gid string, nid string) chan <- *PollData {
-    key := fmt.Sprintf("%s:%s", gid, nid)
+func getProducerChan(gid string, nid string) chan<- *PollData {
+	key := fmt.Sprintf("%s:%s", gid, nid)
 
-    producersLock.Lock()
-    producer, ok := producers[key]
-    if !ok {
-        //start routine for this agent.
-        producer = make(chan *PollData)
-        producers[key] = producer
-        go func() {
-            db := pool.Get()
-            defer db.Close()
+	producersLock.Lock()
+	producer, ok := producers[key]
+	if !ok {
+		//start routine for this agent.
+		producer = make(chan *PollData)
+		producers[key] = producer
+		go func() {
+			db := pool.Get()
+			defer db.Close()
 
-            for {
-                data := <- producer
+			for {
+				data := <-producer
 
-                msgChan := data.MsgChan
-                roles := data.Roles
-                roles_keys := make([]interface{}, 1, len(roles) + 2)
-                roles_keys[0] = key
+				msgChan := data.MsgChan
+				roles := data.Roles
+				roles_keys := make([]interface{}, 1, len(roles)+2)
+				roles_keys[0] = key
 
-                for _, role := range roles {
-                    roles_keys = append(roles_keys, fmt.Sprintf("cmds_queue_%s", role))
-                }
+				for _, role := range roles {
+					roles_keys = append(roles_keys, fmt.Sprintf("cmds_queue_%s", role))
+				}
 
-                roles_keys = append(roles_keys, "0")
+				roles_keys = append(roles_keys, "0")
 
-                pending, err := redis.Strings(db.Do("BLPOP", roles_keys...))
-                if err != nil {
-                    return
-                }
+				pending, err := redis.Strings(db.Do("BLPOP", roles_keys...))
+				if err != nil {
+					return
+				}
 
-                select {
-                    case msgChan <- pending[1]:
-                    default:
-                        //caller didn't want to receive this command. have to repush it
-                        db.Do("LPUSH", "cmds_queue", pending[1])
-                }
+				select {
+				case msgChan <- pending[1]:
+				default:
+					//caller didn't want to receive this command. have to repush it
+					db.Do("LPUSH", "cmds_queue", pending[1])
+				}
 
-                close(data.MsgChan)
-            }
-        }()
-    }
-    producersLock.Unlock()
+				close(data.MsgChan)
+			}
+		}()
+	}
+	producersLock.Unlock()
 
-    return producer
+	return producer
 }
 
 // REST stuff
 func cmd(c *gin.Context) {
-    gid := c.Param("gid")
-    nid := c.Param("nid")
+	gid := c.Param("gid")
+	nid := c.Param("nid")
 
-    query := c.Request.URL.Query()
-    roles := query["role"]
-    log.Printf("[+] gin: execute (gid: %s, nid: %s)\n", gid, nid)
+	query := c.Request.URL.Query()
+	roles := query["role"]
+	log.Printf("[+] gin: execute (gid: %s, nid: %s)\n", gid, nid)
 
-    // listen for http closing
-    notify := c.Writer.(http.CloseNotifier).CloseNotify()
+	// listen for http closing
+	notify := c.Writer.(http.CloseNotifier).CloseNotify()
 
-    timeout := 60 * time.Second
+	timeout := 60 * time.Second
 
-    producer := getProducerChan(gid, nid)
+	producer := getProducerChan(gid, nid)
 
-    data := &PollData{
-        Roles: roles,
-        MsgChan: make(chan string),
-    }
+	data := &PollData{
+		Roles:   roles,
+		MsgChan: make(chan string),
+	}
 
-    select {
-    case producer <- data:
-    case <- time.After(timeout):
-        c.String(http.StatusOK, "")
-        return
-    }
-    //at this point we are sure this is the ONLY agent polling on /gid/nid/cmd
+	select {
+	case producer <- data:
+	case <-time.After(timeout):
+		c.String(http.StatusOK, "")
+		return
+	}
+	//at this point we are sure this is the ONLY agent polling on /gid/nid/cmd
 
-    var payload string
+	var payload string
 
-    select {
-    case payload = <- data.MsgChan:
-    case <- notify:
-    case <- time.After(timeout):
-    }
+	select {
+	case payload = <-data.MsgChan:
+	case <-notify:
+	case <-time.After(timeout):
+	}
 
-    c.String(http.StatusOK, payload)
+	c.String(http.StatusOK, payload)
 }
 
 func logs(c *gin.Context) {
-    gid := c.Param("gid")
-    nid := c.Param("nid")
+	gid := c.Param("gid")
+	nid := c.Param("nid")
 
-    db := pool.Get()
-        defer db.Close()
+	db := pool.Get()
+	defer db.Close()
 
-    log.Printf("[+] gin: log (gid: %s, nid: %s)\n", gid, nid)
+	log.Printf("[+] gin: log (gid: %s, nid: %s)\n", gid, nid)
 
-    // read body
-    content, err := ioutil.ReadAll(c.Request.Body)
+	// read body
+	content, err := ioutil.ReadAll(c.Request.Body)
 
-    if err != nil {
-        log.Println("[-] cannot read body:", err)
-        c.JSON(http.StatusInternalServerError, "error")
-        return
-    }
+	if err != nil {
+		log.Println("[-] cannot read body:", err)
+		c.JSON(http.StatusInternalServerError, "error")
+		return
+	}
 
-    // push body to redis
-    id := fmt.Sprintf("%s:%s:log", gid, nid)
-    log.Printf("[+] message destination [%s]\n", id)
+	// push body to redis
+	id := fmt.Sprintf("%s:%s:log", gid, nid)
+	log.Printf("[+] message destination [%s]\n", id)
 
-    // push message to client queue
-    _, err = db.Do("RPUSH", id, content)
+	// push message to client queue
+	_, err = db.Do("RPUSH", id, content)
 
-    c.JSON(http.StatusOK, "ok")
+	c.JSON(http.StatusOK, "ok")
 }
 
 func result(c *gin.Context) {
-    gid := c.Param("gid")
-    nid := c.Param("nid")
+	gid := c.Param("gid")
+	nid := c.Param("nid")
 
-    db := pool.Get()
-        defer db.Close()
+	db := pool.Get()
+	defer db.Close()
 
-    log.Printf("[+] gin: result (gid: %s, nid: %s)\n", gid, nid)
+	log.Printf("[+] gin: result (gid: %s, nid: %s)\n", gid, nid)
 
-    // read body
-    content, err := ioutil.ReadAll(c.Request.Body)
+	// read body
+	content, err := ioutil.ReadAll(c.Request.Body)
 
-    if err != nil {
-        log.Println("[-] cannot read body:", err)
-        c.JSON(http.StatusInternalServerError, "body error")
-        return
-    }
+	if err != nil {
+		log.Println("[-] cannot read body:", err)
+		c.JSON(http.StatusInternalServerError, "body error")
+		return
+	}
 
-    // decode body
-    var payload CommandMessage
-    err = json.Unmarshal(content, &payload)
+	// decode body
+	var payload CommandMessage
+	err = json.Unmarshal(content, &payload)
 
-    if err != nil {
-        log.Println("[-] cannot read json:", err)
-        c.JSON(http.StatusInternalServerError, "json error")
-        return
-    }
+	if err != nil {
+		log.Println("[-] cannot read json:", err)
+		c.JSON(http.StatusInternalServerError, "json error")
+		return
+	}
 
-    log.Printf("[+] payload: jobid: %d\n", payload.Id)
+	log.Printf("[+] payload: jobid: %d\n", payload.Id)
 
-    // push body to redis
-    log.Printf("[+] message destination [%s]\n", payload.Id)
+	// push body to redis
+	log.Printf("[+] message destination [%s]\n", payload.Id)
 
+	// push message to client queue
+	_, err = db.Do("RPUSH", fmt.Sprintf("cmds_queue_%s", payload.Id), content)
 
-    // push message to client queue
-    _, err = db.Do("RPUSH", fmt.Sprintf("cmds_queue_%s", payload.Id), content)
-
-    c.JSON(http.StatusOK, "ok")
+	c.JSON(http.StatusOK, "ok")
 }
 
 func stats(c *gin.Context) {
-    gid := c.Param("gid")
-    nid := c.Param("nid")
+	gid := c.Param("gid")
+	nid := c.Param("nid")
 
-    log.Printf("[+] gin: stats (gid: %s, nid: %s)\n", gid, nid)
+	log.Printf("[+] gin: stats (gid: %s, nid: %s)\n", gid, nid)
 
-    // read body
-    content, err := ioutil.ReadAll(c.Request.Body)
+	// read body
+	content, err := ioutil.ReadAll(c.Request.Body)
 
-    if err != nil {
-        log.Println("[-] cannot read body:", err)
-        c.JSON(http.StatusInternalServerError, "body error")
-        return
-    }
+	if err != nil {
+		log.Println("[-] cannot read body:", err)
+		c.JSON(http.StatusInternalServerError, "body error")
+		return
+	}
 
-    // decode body
-    var payload StatsRequest
-    err = json.Unmarshal(content, &payload)
+	// decode body
+	var payload StatsRequest
+	err = json.Unmarshal(content, &payload)
 
-    if err != nil {
-        log.Println("[-] cannot read json:", err)
-        c.JSON(http.StatusInternalServerError, "json error")
-        return
-    }
+	if err != nil {
+		log.Println("[-] cannot read json:", err)
+		c.JSON(http.StatusInternalServerError, "json error")
+		return
+	}
 
-    // building Influxdb requests
-    con, err := client.NewClient(&client.ClientConfig{
-        Username: settings.Influxdb.User,
-        Password: settings.Influxdb.Password,
-        Database: settings.Influxdb.Db,
-        Host:     settings.Influxdb.Host,
-    })
+	// building Influxdb requests
+	con, err := client.NewClient(&client.ClientConfig{
+		Username: settings.Influxdb.User,
+		Password: settings.Influxdb.Password,
+		Database: settings.Influxdb.Db,
+		Host:     settings.Influxdb.Host,
+	})
 
-    if err != nil {
-        log.Println(err)
-    }
+	if err != nil {
+		log.Println(err)
+	}
 
-    var timestamp = payload.Timestamp
-    seriesList := make([]*client.Series, len(payload.Series))
+	var timestamp = payload.Timestamp
+	seriesList := make([]*client.Series, len(payload.Series))
 
-    for i := 0; i < len(payload.Series); i++ {
-        series := &client.Series{
-            Name: payload.Series[i][0].(string),
-            Columns: []string{"time", "value"},
-            // FIXME: add all points then write once
-            Points: [][]interface{} {{
-                timestamp * 1000, //influx expects time in ms
-                payload.Series[i][1],
-            },},
-        }
+	for i := 0; i < len(payload.Series); i++ {
+		series := &client.Series{
+			Name:    payload.Series[i][0].(string),
+			Columns: []string{"time", "value"},
+			// FIXME: add all points then write once
+			Points: [][]interface{}{{
+				timestamp * 1000, //influx expects time in ms
+				payload.Series[i][1],
+			}},
+		}
 
-        seriesList[i] =  series
-    }
+		seriesList[i] = series
+	}
 
-    if err := con.WriteSeries(seriesList); err != nil {
-        log.Println(err)
-        return
-    }
+	if err := con.WriteSeries(seriesList); err != nil {
+		log.Println(err)
+		return
+	}
 
-    c.JSON(http.StatusOK, "ok")
+	c.JSON(http.StatusOK, "ok")
 }
 
 func event(c *gin.Context) {
-    gid := c.Param("gid")
-    nid := c.Param("nid")
+	gid := c.Param("gid")
+	nid := c.Param("nid")
 
-    log.Printf("[+] gin: event (gid: %s, nid: %s)\n", gid, nid)
+	log.Printf("[+] gin: event (gid: %s, nid: %s)\n", gid, nid)
 
-    content, err := ioutil.ReadAll(c.Request.Body)
+	content, err := ioutil.ReadAll(c.Request.Body)
 
-    if err != nil {
-        log.Println("[-] cannot read body:", err)
-        c.JSON(http.StatusInternalServerError, "body error")
-        return
-    }
+	if err != nil {
+		log.Println("[-] cannot read body:", err)
+		c.JSON(http.StatusInternalServerError, "body error")
+		return
+	}
 
-    var payload EvenRequest
-    log.Printf("%s", content)
-    err = json.Unmarshal(content, &payload)
-    if err != nil {
-        log.Println(err)
-        c.JSON(http.StatusInternalServerError, "Error")
-    }
+	var payload EvenRequest
+	log.Printf("%s", content)
+	err = json.Unmarshal(content, &payload)
+	if err != nil {
+		log.Println(err)
+		c.JSON(http.StatusInternalServerError, "Error")
+	}
 
-    cmd := exec.Command(settings.Handlers.Binary,
-        fmt.Sprintf("%s.py", payload.Name), gid, nid)
+	cmd := exec.Command(settings.Handlers.Binary,
+		fmt.Sprintf("%s.py", payload.Name), gid, nid)
 
-    cmd.Dir = settings.Handlers.Cwd
-    //build env string
-    var env []string
-    if len(settings.Handlers.Env) > 0 {
-        env = make([]string, 0, len(settings.Handlers.Env))
-        for ek, ev := range settings.Handlers.Env {
-            env = append(env, fmt.Sprintf("%v=%v", ek, ev))
-        }
+	cmd.Dir = settings.Handlers.Cwd
+	//build env string
+	var env []string
+	if len(settings.Handlers.Env) > 0 {
+		env = make([]string, 0, len(settings.Handlers.Env))
+		for ek, ev := range settings.Handlers.Env {
+			env = append(env, fmt.Sprintf("%v=%v", ek, ev))
+		}
 
-    }
+	}
 
-    cmd.Env = env
+	cmd.Env = env
 
-    stderr, err := cmd.StderrPipe()
-    if err != nil {
-        log.Println("Failed to open process stderr", err)
-    }
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		log.Println("Failed to open process stderr", err)
+	}
 
-    log.Println("Starting handler for", payload.Name, "event, for agent", gid, nid)
-    err = cmd.Start()
-    if err != nil {
-        log.Println(err)
-    } else {
-        go func(){
-            //wait for command to exit.
-            cmderrors, err := ioutil.ReadAll(stderr)
-            if len(cmderrors) > 0 {
-                log.Printf("%s(%s:%s): %s", payload.Name, gid, nid, cmderrors)
-            }
+	log.Println("Starting handler for", payload.Name, "event, for agent", gid, nid)
+	err = cmd.Start()
+	if err != nil {
+		log.Println(err)
+	} else {
+		go func() {
+			//wait for command to exit.
+			cmderrors, err := ioutil.ReadAll(stderr)
+			if len(cmderrors) > 0 {
+				log.Printf("%s(%s:%s): %s", payload.Name, gid, nid, cmderrors)
+			}
 
-            err = cmd.Wait()
-            if err != nil {
-                log.Println("Failed to handle ", payload.Name, " event for agent: ", gid, nid, err)
-            }
-        }()
-    }
+			err = cmd.Wait()
+			if err != nil {
+				log.Println("Failed to handle ", payload.Name, " event for agent: ", gid, nid, err)
+			}
+		}()
+	}
 
-
-    c.JSON(http.StatusOK, "ok")
+	c.JSON(http.StatusOK, "ok")
 }
 
 func hubbleProxy(context *gin.Context) {
-    hubble.ProxyHandler(context.Writer, context.Request)
+	hubble.ProxyHandler(context.Writer, context.Request)
 }
 
 var settings Settings
 
 func main() {
-    var cfg string
-    var help bool
+	var cfg string
+	var help bool
 
-    flag.BoolVar(&help, "h", false, "Print this help screen")
-    flag.StringVar(&cfg, "c", "", "Path to config file")
-    flag.Parse()
+	flag.BoolVar(&help, "h", false, "Print this help screen")
+	flag.StringVar(&cfg, "c", "", "Path to config file")
+	flag.Parse()
 
-    printHelp := func() {
-        log.Println("agentcontroller [options]")
-        flag.PrintDefaults()
-    }
+	printHelp := func() {
+		log.Println("agentcontroller [options]")
+		flag.PrintDefaults()
+	}
 
-    if help {
-        printHelp()
-        return
-    }
+	if help {
+		printHelp()
+		return
+	}
 
-    if cfg == "" {
-        log.Println("Missing required option -c")
-        flag.PrintDefaults()
-        os.Exit(1)
-    }
+	if cfg == "" {
+		log.Println("Missing required option -c")
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
 
-    LoadTomlFile(cfg, &settings)
+	LoadTomlFile(cfg, &settings)
 
-    log.Printf("[+] webservice: <%s>\n", settings.Main.Listen)
-    log.Printf("[+] redis server: <%s>\n", settings.Main.RedisHost)
+	log.Printf("[+] webservice: <%s>\n", settings.Main.Listen)
+	log.Printf("[+] redis server: <%s>\n", settings.Main.RedisHost)
 
-    pool = newPool(settings.Main.RedisHost, settings.Main.RedisPassword)
-    router := gin.Default()
+	pool = newPool(settings.Main.RedisHost, settings.Main.RedisPassword)
+	router := gin.Default()
 
-    go cmdreader()
+	go cmdreader()
 
+	router.GET("/:gid/:nid/cmd", cmd)
+	router.POST("/:gid/:nid/log", logs)
+	router.POST("/:gid/:nid/result", result)
+	router.POST("/:gid/:nid/stats", stats)
+	router.POST("/:gid/:nid/event", event)
+	router.GET("/:gid/:nid/hubble", hubbleProxy)
+	// router.Static("/doc", "./doc")
 
-    router.GET("/:gid/:nid/cmd", cmd)
-    router.POST("/:gid/:nid/log", logs)
-    router.POST("/:gid/:nid/result", result)
-    router.POST("/:gid/:nid/stats", stats)
-    router.POST("/:gid/:nid/event", event)
-    router.GET("/:gid/:nid/hubble", hubbleProxy)
-    // router.Static("/doc", "./doc")
-
-    router.Run(settings.Main.Listen)
+	router.Run(settings.Main.Listen)
 }
