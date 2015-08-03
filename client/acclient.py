@@ -207,6 +207,9 @@ class Cmd(BaseCmd):
         if role is not None and (gid, nid) != (None, None):
             raise ValueError('Role is mutual exclusive with gid/nid')
 
+        if (gid, nid, role) == (None, None, None):
+            raise ValueError('Gid/Nid or Role must be supplied')
+
         super(Cmd, self).__init__(client, redis_client, id, gid, nid)
         self._cmd = cmd
         self._args = run_args
