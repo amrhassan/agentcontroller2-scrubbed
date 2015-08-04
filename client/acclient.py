@@ -204,11 +204,11 @@ class Cmd(BaseCmd):
         if not isinstance(run_args, RunArgs):
             raise ValueError('Invalid arguments')
 
-        if role is not None and (gid, nid) != (None, None):
-            raise ValueError('Role is mutual exclusive with gid/nid')
+        if not (bool(role) ^ bool(nid)):
+            raise ValueError('Nid and Role are mutual exclusive')
 
-        if (gid, nid, role) == (None, None, None):
-            raise ValueError('Gid/Nid or Role must be supplied')
+        if not bool(gid) and not bool(role):
+            raise ValueError('Gid or Role are required')
 
         super(Cmd, self).__init__(client, redis_client, id, gid, nid)
         self._cmd = cmd
@@ -258,14 +258,20 @@ class Client(object):
     def cmd(self, gid, nid, cmd, args, data=None, id=None, role=None):
         """
         Executes a command, return a cmd descriptor
-        :gid: grid id
-        :nid: node id
+        :gid: grid id (can be None)
+        :nid: node id (can be None)
         :cmd: one of the supported commands (execute, execute_js_py, get_?_info, etc...)
         :args: instance of RunArgs
         :data: Raw data to send to the command standard input. Passed as objecte and will be dumped as json on wire
         :id: id of command for retrieve later, if None a random GUID will be generated.
         :role: Optional role, only agents that satisfy this role can process this job. This is mutual exclusive with
             gid/nid compo in that case, the gid/nid values must be None or a ValueError will be raised.
+
+        Allowed compinations
+        [GID|NID|ROLE]
+        [ X | X |  O ] # To specific agent Gid/Nid
+        [ X | O |  X ] # Any agent with that role on this grid
+        [ O | O |  X ] # Any agent with that role globaly
         """
         cmd_id = id or str(uuid.uuid4())
 

@@ -131,7 +131,11 @@ func cmdreader() {
 		var id string
 		if payload.Role != "" {
 			//command has a given role
-			id = fmt.Sprintf("cmds_queue_%s", payload.Role)
+			if payload.Gid == 0 {
+				id = fmt.Sprintf("cmds_queue_%s", payload.Role)
+			} else {
+				id = fmt.Sprintf("cmds_queue_%d_%s", payload.Gid, payload.Role)
+			}
 		} else {
 			id = fmt.Sprintf("%d:%d", payload.Gid, payload.Nid)
 		}
@@ -180,15 +184,17 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 
 				msgChan := data.MsgChan
 				roles := data.Roles
-				roles_keys := make([]interface{}, 1, len(roles)+2)
+				roles_keys := make([]interface{}, 1, len(roles)*2+2)
 				roles_keys[0] = key
 
 				for _, role := range roles {
-					roles_keys = append(roles_keys, fmt.Sprintf("cmds_queue_%s", role))
+					roles_keys = append(roles_keys,
+						fmt.Sprintf("cmds_queue_%s", role),
+						fmt.Sprintf("cmds_queue_%s_%s", gid, role))
 				}
 
 				roles_keys = append(roles_keys, "0")
-
+				log.Println(roles_keys)
 				pending, err := redis.Strings(db.Do("BLPOP", roles_keys...))
 				if err != nil {
 					return
@@ -306,7 +312,7 @@ func result(c *gin.Context) {
 		return
 	}
 
-	log.Printf("[+] payload: jobid: %d\n", payload.Id)
+	log.Printf("[+] payload: jobid: %s\n", payload.Id)
 
 	// push body to redis
 	log.Printf("[+] message destination [%s]\n", payload.Id)
