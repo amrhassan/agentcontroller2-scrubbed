@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	hubbleAuth "github.com/Jumpscale/hubble/auth"
 	hubble "github.com/Jumpscale/hubble/proxy"
 	"github.com/Jumpscale/jsagentcontroller/influxdb-client-0.8.8"
 	"github.com/garyburd/redigo/redis"
@@ -490,6 +491,7 @@ func main() {
 
 	go cmdreader()
 
+	hubbleAuth.Install(hubbleAuth.NewAcceptAllModule())
 	router.GET("/:gid/:nid/cmd", cmd)
 	router.POST("/:gid/:nid/log", logs)
 	router.POST("/:gid/:nid/result", result)
