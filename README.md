@@ -29,6 +29,6 @@ Note: GID, NID and JID is extracted from URL or from JSON body
 * Format: {timestamp: xxx, series: [[key, value], [key, value], ...]}
 
 # Commands Reader
-* Wait for commands from *\_\_master\_\_* queue
+* Wait for commands from *cmds_queue* queue
 * Decode JSON from this queue
 * Push JSON on the right queue based on GID:NID
