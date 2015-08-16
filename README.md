@@ -1,14 +1,14 @@
-# jsagentcontroller
-JumpScale Agentcontroller in Go
+# agentcontroller2
+JumpScale agentcontroller2 in Go
 
 # Installation
 ```
-go get github.com/Jumpscale/jsagentcontroller
+go get github.com/Jumpscale/agentcontroller2
 ```
 
 # Running jsagencontroller
 ```
-go run main.go -c agentcontroller.toml
+go run main.go -c agentcontroller2.toml
 ```
 
 # REST Service
