@@ -15,7 +15,6 @@ cwd = "./handlers"
     [handlers.env]
     PYTHONPATH = "/opt/jumpscale7/lib:../client"
     SYNCTHING_URL = "http://localhost:8384/"
-    SYNCTHING_SHARED_FOLDER_ID = "jumpscripts"
     #SYNCTHING_API_KEY = ""
     REDIS_ADDRESS = "localhost"
     REDIS_PORT = "6379"

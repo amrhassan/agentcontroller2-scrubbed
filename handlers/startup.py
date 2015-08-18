@@ -1,11 +1,25 @@
 import json
 import requests
+import logging
 
 import utils
 import acclient
 
 ENDPOINT_CONFIG = '/rest/system/config'
 ENDPOINT_RESTART = '/rest/system/restart'
+
+
+"""
+SHARE_FOLDERS defines what folders to share on agent
+key: local folder id
+value: remote path to where to share on agent side.
+
+Currently we only share legacy and jumpscripts folder to agent
+"""
+SHARE_FOLDERS = {
+    'legacy': '/opt/jumpscale7/apps/agent2/legacy',
+    'jumpscripts': '/opt/jumpscale7/apps/agent2/jumpscripts'
+}
 
 
 def results_or_die(results):
@@ -21,6 +35,7 @@ def get_url(endpoint):
     return '%s%s' % (base_url, endpoint)
 
 
+@utils.exclusive('/tmp/agent-start.lock')
 def startup(gid, nid):
     # TODO: client must use settings of somekind
     sessions = requests.Session()
@@ -74,19 +89,21 @@ def startup(gid, nid):
         dirty = True
 
     # add device to shared folder.
-    folders = filter(lambda f: f['id'] == syncthing['shared-folder-id'], config['folders'])
+    for folder_id in SHARE_FOLDERS:
+        folders = filter(lambda f: f['id'] == folder_id, config['folders'])
 
-    if not folders:
-        raise Exception('No folder with id %s found' % syncthing['shared-folder-id'])
+        if not folders:
+            logging.warn('Folder id "%s" is not shared on syncthing', folder_id)
+            continue
 
-    folder = folders[0]
-    if not filter(lambda d: d['deviceID'] == agent_device_id, folder['devices']):
-        # share folder with device.
+        folder = folders[0]
+        if not filter(lambda d: d['deviceID'] == agent_device_id, folder['devices']):
+            # share folder with device.
 
-        folder['devices'].append({
-            'deviceID': agent_device_id
-        })
-        dirty = True
+            folder['devices'].append({
+                'deviceID': agent_device_id
+            })
+            dirty = True
 
     if dirty:
         # apply changes
@@ -101,14 +118,17 @@ def startup(gid, nid):
     # Now, the syncthing on AC side knows about the syncthing on Agent side. Now we have
     # to register this instance of syncthing on agent as well. We can do this via a simple agent command
 
-    data = {
-        'device_id': local_device_id,
-        'folder_id': syncthing['shared-folder-id']
-    }
+    for folder_id, remote_path in SHARE_FOLDERS.iteritems():
+        data = {
+            'device_id': local_device_id,
+            'folder_id': syncthing['shared-folder-id'],
+            'path': remote_path
+        }
 
-    result = client.cmd(gid, nid, 'sync', default.update({'name': 'sync_jumpscripts'}), data).get_result()
-    if result['state'] != 'SUCCESS':
-        raise Exception('Error syncthing jumpscripts folder on agent: %s' % result['data'])
+        result = client.cmd(gid, nid, 'sync', default.update({'name': 'sync_folder'}), data).get_result()
+        if result['state'] != 'SUCCESS':
+            logging.warn('Error syncthing jumpscripts folder on agent: %s' % result['data'])
+            continue
 
 if __name__ == '__main__':
     utils.run(startup)
