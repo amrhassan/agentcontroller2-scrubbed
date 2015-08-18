@@ -121,7 +121,7 @@ def startup(gid, nid):
     for folder_id, remote_path in SHARE_FOLDERS.iteritems():
         data = {
             'device_id': local_device_id,
-            'folder_id': syncthing['shared-folder-id'],
+            'folder_id': folder_id,
             'path': remote_path
         }
 
