@@ -14,7 +14,7 @@ binary = "python2.7"
 cwd = "./handlers"
     [handlers.env]
     PYTHONPATH = "/opt/jumpscale7/lib:../client"
-    SYNCTHING_URL = "http://localhost:8384/"
+    SYNCTHING_URL = "http://localhost:18384/"
     #SYNCTHING_API_KEY = ""
     REDIS_ADDRESS = "localhost"
     REDIS_PORT = "6379"
