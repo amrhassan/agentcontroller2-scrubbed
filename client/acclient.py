@@ -155,9 +155,9 @@ class RunArgs(object):
 
 
 class BaseCmd(object):
-    def __init__(self, client, redis_client, id, gid, nid):
+    def __init__(self, client, id, gid, nid):
         self._client = client
-        self._redis = redis_client
+        self._redis = client._redis
         self._id = id
         self._gid = 0 if gid is None else int(gid)
         self._nid = 0 if nid is None else int(nid)
@@ -200,8 +200,8 @@ class BaseCmd(object):
 
 
 class Cmd(BaseCmd):
-    def __init__(self, client, redis_client, id, gid, nid, cmd, run_args, data, role):
-        if not isinstance(run_args, RunArgs):
+    def __init__(self, client, id, gid, nid, cmd, args, data, role):
+        if not isinstance(args, RunArgs):
             raise ValueError('Invalid arguments')
 
         if not (bool(role) ^ bool(nid)):
@@ -210,9 +210,9 @@ class Cmd(BaseCmd):
         if not bool(gid) and not bool(role):
             raise ValueError('Gid or Role are required')
 
-        super(Cmd, self).__init__(client, redis_client, id, gid, nid)
+        super(Cmd, self).__init__(client, id, gid, nid)
         self._cmd = cmd
-        self._args = run_args
+        self._args = args
         self._data = data
         self._role = role
 
@@ -242,6 +242,9 @@ class Cmd(BaseCmd):
             'args': self.args.dump(),
             'data': json.dumps(self.data) if self.data is not None else ''
         }
+
+    def __repr__(self):
+        return repr(self.dump())
 
 
 class Client(object):
@@ -275,7 +278,7 @@ class Client(object):
         """
         cmd_id = id or str(uuid.uuid4())
 
-        cmd = Cmd(self, self._redis, cmd_id, gid, nid, cmd, args, data, role)
+        cmd = Cmd(self, cmd_id, gid, nid, cmd, args, data, role)
 
         payload = json.dumps(cmd.dump())
         self._redis.rpush('cmds_queue', payload)
@@ -320,7 +323,7 @@ class Client(object):
         """
         Get a command descriptor by an ID. So you can read command result later if the ID is known.
         """
-        return BaseCmd(self, self._redis, id, gid, nid)
+        return BaseCmd(self, id, gid, nid)
 
     def get_cpu_info(self, gid, nid):
         """
@@ -457,3 +460,26 @@ class Client(object):
             raise Exception(result['data'])
 
         return json.loads(result['data'])
+
+    def get_jobs(self, start=0, count=100):
+        """
+        Retrieves jobs losgs. This by default returns the latest 100 jobs. You can
+        change the `start` and `count` argument to thinking of the jobs history as a list where
+        the most recent job is at index 0
+
+        :start: Start index to retrieve, default 0
+        :count: Number of jobs to retrieve
+        """
+        assert count > 0, "Invalid count, must be greater than 0"
+
+        def _map(s):
+            j = json.loads(s)
+            result = self._redis.hget('jobresult', j['id'])
+            if result:
+                result = json.loads(result)
+                result.pop('args', None)
+
+            j['result'] = result
+            return j
+
+        return map(_map, self._redis.lrange('joblog', start, start + count - 1))
