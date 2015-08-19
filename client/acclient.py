@@ -200,7 +200,7 @@ class BaseCmd(object):
 
 
 class Cmd(BaseCmd):
-    def __init__(self, client, redis_client, id, gid, nid, cmd, run_args, data, role):
+    def __init__(self, client, redis_client, id, gid, nid, cmd, run_args, data, role, fanout):
         if not isinstance(run_args, RunArgs):
             raise ValueError('Invalid arguments')
 
@@ -210,11 +210,15 @@ class Cmd(BaseCmd):
         if not bool(gid) and not bool(role):
             raise ValueError('Gid or Role are required')
 
+        if fanout and role is None:
+            raise ValueError('Fanout only effective if role is set')
+
         super(Cmd, self).__init__(client, redis_client, id, gid, nid)
         self._cmd = cmd
         self._args = run_args
         self._data = data
         self._role = role
+        self._fanout = fanout
 
     @property
     def cmd(self):
@@ -232,12 +236,17 @@ class Cmd(BaseCmd):
     def role(self):
         return self._role
 
+    @property
+    def fanout(self):
+        return self._fanout
+
     def dump(self):
         return {
             'id': self.id,
             'gid': self.gid,
             'nid': self.nid,
             'role': self.role,
+            'fanout': self.fanout,
             'cmd': self.cmd,
             'args': self.args.dump(),
             'data': json.dumps(self.data) if self.data is not None else ''
@@ -255,7 +264,7 @@ class Client(object):
         # Check the connectivity
         self._redis.ping()
 
-    def cmd(self, gid, nid, cmd, args, data=None, id=None, role=None):
+    def cmd(self, gid, nid, cmd, args, data=None, id=None, role=None, fanout=False):
         """
         Executes a command, return a cmd descriptor
         :gid: grid id (can be None)
@@ -266,6 +275,7 @@ class Client(object):
         :id: id of command for retrieve later, if None a random GUID will be generated.
         :role: Optional role, only agents that satisfy this role can process this job. This is mutual exclusive with
             gid/nid compo in that case, the gid/nid values must be None or a ValueError will be raised.
+        :fanout: Send job to ALL agents that satisfy the given role. Only effective is role is set.
 
         Allowed compinations
         [GID|NID|ROLE]
@@ -275,7 +285,7 @@ class Client(object):
         """
         cmd_id = id or str(uuid.uuid4())
 
-        cmd = Cmd(self, self._redis, cmd_id, gid, nid, cmd, args, data, role)
+        cmd = Cmd(self, self._redis, cmd_id, gid, nid, cmd, args, data, role, fanout)
 
         payload = json.dumps(cmd.dump())
         self._redis.rpush('cmds_queue', payload)

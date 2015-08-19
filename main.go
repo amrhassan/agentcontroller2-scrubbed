@@ -178,10 +178,25 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 		producers[key] = producer
 		go func() {
 			db := pool.Get()
-			defer db.Close()
+			defer func() {
+				db.Close()
+
+				//no agent tried to connect
+				close(producer)
+				producersLock.Lock()
+				defer producersLock.Unlock()
+				delete(producers, key)
+			}()
 
 			for {
-				data := <-producer
+				var data *PollData
+				select {
+				case data = <-producer:
+				case time.After(10 * time.Minute):
+					//no active agent for 10 min
+					log.Printf("Agent %s:%s is inactive for 10min, cleaning up.\n", gid, nid)
+					return
+				}
 
 				msgChan := data.MsgChan
 				roles := data.Roles
@@ -195,9 +210,9 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 				}
 
 				roles_keys = append(roles_keys, "0")
-				log.Println(roles_keys)
 				pending, err := redis.Strings(db.Do("BLPOP", roles_keys...))
 				if err != nil {
+					log.Println(err)
 					return
 				}
 
@@ -210,6 +225,7 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 
 				close(data.MsgChan)
 			}
+
 		}()
 	}
 	producersLock.Unlock()
