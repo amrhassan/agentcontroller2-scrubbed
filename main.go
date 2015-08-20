@@ -16,8 +16,13 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+)
+
+const (
+	AGENT_INACTIVER_AFTER_OVER = 10 * time.Minute
 )
 
 type Settings struct {
@@ -59,10 +64,11 @@ func LoadTomlFile(filename string, v interface{}) {
 
 // data types
 type CommandMessage struct {
-	Id   string `json:"id"`
-	Gid  int    `json:"gid"`
-	Nid  int    `json:"nid"`
-	Role string `json:"role"`
+	Id     string `json:"id"`
+	Gid    int    `json:"gid"`
+	Nid    int    `json:"nid"`
+	Role   string `json:"role"`
+	Fanout bool   `json:"fanout"`
 }
 
 type CommandResult struct {
@@ -89,7 +95,7 @@ func newPool(addr string, password string) *redis.Pool {
 		MaxIdle:   80,
 		MaxActive: 12000,
 		Dial: func() (redis.Conn, error) {
-			c, err := redis.Dial("tcp", addr)
+			c, err := redis.DialTimeout("tcp", addr, 0, 10*time.Second, 0)
 
 			if err != nil {
 				panic(err.Error())
@@ -109,57 +115,70 @@ func newPool(addr string, password string) *redis.Pool {
 
 var pool *redis.Pool
 
-// Command Reader
-func cmdreader() {
+func isTimeout(err error) bool {
+	return strings.Contains(err.Error(), "timeout")
+}
+
+func readSingleCmd() bool {
 	db := pool.Get()
 	defer db.Close()
 
+	command, err := redis.Strings(db.Do("BLPOP", "cmds_queue", "0"))
+
+	if err != nil {
+		if isTimeout(err) {
+			return true
+		}
+		log.Println("[-] pop error: ", err)
+		return false
+	}
+
+	log.Println("[+] message payload: ", command[1])
+
+	// parsing json data
+	var payload CommandMessage
+	err = json.Unmarshal([]byte(command[1]), &payload)
+
+	if err != nil {
+		log.Println("[-] message decoding: ", err)
+		return true
+	}
+
+	//sort command to the consumer queue.
+	//either by role or by the gid/nid.
+	var id string
+	if payload.Role != "" {
+		//command has a given role
+		if payload.Gid == 0 {
+			id = fmt.Sprintf("cmds_queue_%s", payload.Role)
+		} else {
+			id = fmt.Sprintf("cmds_queue_%d_%s", payload.Gid, payload.Role)
+		}
+	} else {
+		id = fmt.Sprintf("%d:%d", payload.Gid, payload.Nid)
+	}
+
+	log.Printf("[+] message destination [%s]\n", id)
+
+	// push logs
+	if _, err := db.Do("LPUSH", "joblog", command[1]); err != nil {
+		log.Println("[-] log push error: ", err)
+	}
+
+	// push message to client queue
+	if _, err := db.Do("RPUSH", id, command[1]); err != nil {
+		log.Println("[-] push error: ", err)
+	}
+
+	return true
+}
+
+// Command Reader
+func cmdreader() {
 	for {
 		// waiting message from master queue
-		command, err := redis.Strings(db.Do("BLPOP", "cmds_queue", "0"))
-
-		log.Println("[+] message from master redis queue")
-
-		if err != nil {
-			log.Println("[-] pop error: ", err)
-			continue
-		}
-
-		log.Println("[+] message payload: ", command[1])
-
-		// parsing json data
-		var payload CommandMessage
-		err = json.Unmarshal([]byte(command[1]), &payload)
-
-		if err != nil {
-			log.Println("[-] message decoding: ", err)
-			continue
-		}
-
-		//sort command to the consumer queue.
-		//either by role or by the gid/nid.
-		var id string
-		if payload.Role != "" {
-			//command has a given role
-			if payload.Gid == 0 {
-				id = fmt.Sprintf("cmds_queue_%s", payload.Role)
-			} else {
-				id = fmt.Sprintf("cmds_queue_%d_%s", payload.Gid, payload.Role)
-			}
-		} else {
-			id = fmt.Sprintf("%d:%d", payload.Gid, payload.Nid)
-		}
-
-		log.Printf("[+] message destination [%s]\n", id)
-
-		// push logs
-		if _, err := db.Do("LPUSH", "joblog", command[1]); err != nil {
-			log.Println("[-] log push error: ", err)
-		}
-
-		// push message to client queue
-		if _, err := db.Do("RPUSH", id, command[1]); err != nil {
-			log.Println("[-] push error: ", err)
+		if !readSingleCmd() {
+			return
 		}
 	}
 }
@@ -188,12 +207,15 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 		igid, _ := strconv.Atoi(gid)
 		inid, _ := strconv.Atoi(nid)
 		//start routine for this agent.
+		log.Printf("Agent %s:%s active, starting agent routine\n", gid, nid)
+
 		producer = make(chan *PollData)
 		producers[key] = producer
 		go func() {
-			db := pool.Get()
+			//db := pool.Get()
+
 			defer func() {
-				db.Close()
+				//db.Close()
 
 				//no agent tried to connect
 				close(producer)
@@ -203,61 +225,74 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 			}()
 
 			for {
-				var data *PollData
-				select {
-				case data = <-producer:
-				case time.After(10 * time.Minute):
-					//no active agent for 10 min
-					log.Printf("Agent %s:%s is inactive for 10min, cleaning up.\n", gid, nid)
+				if !func() bool {
+					var data *PollData
+
+					select {
+					case data = <-producer:
+					case <-time.After(AGENT_INACTIVER_AFTER_OVER):
+						//no active agent for 10 min
+						log.Printf("Agent", key, "is inactive for over 10 min, cleaning up.\n", gid, nid)
+						return false
+					}
+
+					msgChan := data.MsgChan
+					defer close(msgChan)
+
+					roles := data.Roles
+					roles_keys := make([]interface{}, 1, len(roles)*2+2)
+					roles_keys[0] = key
+
+					for _, role := range roles {
+						roles_keys = append(roles_keys,
+							fmt.Sprintf("cmds_queue_%s", role),
+							fmt.Sprintf("cmds_queue_%s_%s", gid, role))
+					}
+
+					roles_keys = append(roles_keys, "0")
+					db := pool.Get()
+					defer db.Close()
+
+					pending, err := redis.Strings(db.Do("BLPOP", roles_keys...))
+					if err != nil {
+						if !isTimeout(err) {
+							log.Println("Couldn't get new job for agent", key, err)
+						}
+
+						return true
+					}
+
+					select {
+					case msgChan <- pending[1]:
+						//caller consumed this job, it's safe to set it's state to RUNNING now.
+						var payload CommandMessage
+						if err := json.Unmarshal([]byte(pending[1]), &payload); err != nil {
+							break
+						}
+
+						result_placehoder := CommandResult{
+							Id:        payload.Id,
+							Gid:       igid,
+							Nid:       inid,
+							State:     "RUNNING",
+							StartTime: int64(time.Duration(time.Now().UnixNano()) / time.Millisecond),
+						}
+
+						if data, err := json.Marshal(&result_placehoder); err == nil {
+							db.Do("HSET",
+								fmt.Sprintf("jobresult:%s", payload.Id),
+								fmt.Sprintf("%d:%d", igid, inid),
+								data)
+						}
+					default:
+						//caller didn't want to receive this command. have to repush it
+						db.Do("LPUSH", "cmds_queue", pending[1])
+					}
+
+					return true
+				}() {
 					return
 				}
-
-				msgChan := data.MsgChan
-				roles := data.Roles
-				roles_keys := make([]interface{}, 1, len(roles)*2+2)
-				roles_keys[0] = key
-
-				for _, role := range roles {
-					roles_keys = append(roles_keys,
-						fmt.Sprintf("cmds_queue_%s", role),
-						fmt.Sprintf("cmds_queue_%s_%s", gid, role))
-				}
-
-				roles_keys = append(roles_keys, "0")
-				pending, err := redis.Strings(db.Do("BLPOP", roles_keys...))
-				if err != nil {
-					log.Println(err)
-					return
-				}
-
-				select {
-				case msgChan <- pending[1]:
-					//caller consumed this job, it's safe to set it's state to RUNNING now.
-					var payload CommandMessage
-					if err := json.Unmarshal([]byte(pending[1]), &payload); err != nil {
-						break
-					}
-
-					result_placehoder := CommandResult{
-						Id:        payload.Id,
-						Gid:       igid,
-						Nid:       inid,
-						State:     "RUNNING",
-						StartTime: int64(time.Duration(time.Now().UnixNano()) / time.Millisecond),
-					}
-
-					if data, err := json.Marshal(&result_placehoder); err == nil {
-						db.Do("HSET",
-							fmt.Sprintf("jobresult:%s", payload.Id),
-							fmt.Sprintf("%d:%d", igid, inid),
-							data)
-					}
-				default:
-					//caller didn't want to receive this command. have to repush it
-					db.Do("LPUSH", "cmds_queue", pending[1])
-				}
-
-				close(data.MsgChan)
 			}
 
 		}()
@@ -543,6 +578,14 @@ func main() {
 	log.Printf("[+] redis server: <%s>\n", settings.Main.RedisHost)
 
 	pool = newPool(settings.Main.RedisHost, settings.Main.RedisPassword)
+
+	db := pool.Get()
+	if _, err := db.Do("PING"); err != nil {
+		panic(fmt.Sprintf("Failed to connect to redis: %v", err))
+	}
+
+	db.Close()
+
 	router := gin.Default()
 
 	go cmdreader()
