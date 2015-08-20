@@ -1,10 +1,16 @@
 import acclient
 from .legacyclient import LegacyClient
+from JumpScale import j
 
 
 class ACFactory(object):
     def get(self, address='localhost', port=9999, password=None, db=0):
         return acclient.Client(address, port, password, db)
+
+    def getByInstance(self, name):
+        service = j.atyourservice.get(name='agentcontroller2_client', instance=name)
+        redis = service.hrd.getDictFromPrefix('instance.param.redis')
+        return self.get(**redis)
 
     def getRunArgs(self, domain=None, name=None, max_time=0, max_restart=0, recurring_period=0, stats_interval=0,
                    args=None, loglevels='*', loglevels_db=None, loglevels_ac=None):

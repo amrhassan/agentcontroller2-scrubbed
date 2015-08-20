@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -62,6 +63,14 @@ type CommandMessage struct {
 	Gid  int    `json:"gid"`
 	Nid  int    `json:"nid"`
 	Role string `json:"role"`
+}
+
+type CommandResult struct {
+	Id        string `json:"id"`
+	Nid       int    `json:"nid"`
+	Gid       int    `json:"gid"`
+	State     string `json:"state"`
+	StartTime int64  `json:"starttime"`
 }
 
 type StatsRequest struct {
@@ -143,10 +152,13 @@ func cmdreader() {
 
 		log.Printf("[+] message destination [%s]\n", id)
 
-		// push message to client queue
-		_, err = db.Do("RPUSH", id, command[1])
+		// push logs
+		if _, err := db.Do("LPUSH", "joblog", command[1]); err != nil {
+			log.Println("[-] log push error: ", err)
+		}
 
-		if err != nil {
+		// push message to client queue
+		if _, err := db.Do("RPUSH", id, command[1]); err != nil {
 			log.Println("[-] push error: ", err)
 		}
 	}
@@ -173,6 +185,8 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 	producersLock.Lock()
 	producer, ok := producers[key]
 	if !ok {
+		igid, _ := strconv.Atoi(gid)
+		inid, _ := strconv.Atoi(nid)
 		//start routine for this agent.
 		producer = make(chan *PollData)
 		producers[key] = producer
@@ -218,6 +232,26 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 
 				select {
 				case msgChan <- pending[1]:
+					//caller consumed this job, it's safe to set it's state to RUNNING now.
+					var payload CommandMessage
+					if err := json.Unmarshal([]byte(pending[1]), &payload); err != nil {
+						break
+					}
+
+					result_placehoder := CommandResult{
+						Id:        payload.Id,
+						Gid:       igid,
+						Nid:       inid,
+						State:     "RUNNING",
+						StartTime: int64(time.Duration(time.Now().UnixNano()) / time.Millisecond),
+					}
+
+					if data, err := json.Marshal(&result_placehoder); err == nil {
+						db.Do("HSET",
+							fmt.Sprintf("jobresult:%s", payload.Id),
+							fmt.Sprintf("%d:%d", igid, inid),
+							data)
+					}
 				default:
 					//caller didn't want to receive this command. have to repush it
 					db.Do("LPUSH", "cmds_queue", pending[1])
@@ -334,8 +368,14 @@ func result(c *gin.Context) {
 	// push body to redis
 	log.Printf("[+] message destination [%s]\n", payload.Id)
 
+	// update jobresult
+	db.Do("HSET",
+		fmt.Sprintf("jobresult:%s", payload.Id),
+		fmt.Sprintf("%d:%d", payload.Gid, payload.Nid),
+		content)
+
 	// push message to client queue
-	_, err = db.Do("RPUSH", fmt.Sprintf("cmds_queue_%s", payload.Id), content)
+	db.Do("RPUSH", fmt.Sprintf("cmds_queue_%s", payload.Id), content)
 
 	c.JSON(http.StatusOK, "ok")
 }
