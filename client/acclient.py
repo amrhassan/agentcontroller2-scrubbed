@@ -176,11 +176,25 @@ class BaseCmd(object):
         return self._nid
 
     def get_result(self, timeout=0):
-        if self._result is None:
-            queue, result = self._redis.blpop("cmds_queue_%s" % self.id, timeout)
-            self._result = json.loads(result)
+        """
+        Pops and returns the first available result for that job. It blocks until the result is givent
 
-        return self._result
+        :timeout: Waits for this amount of seconds before giving up on results. 0 means wait forever.
+
+        Note: the result is POPed out of the result queue, so a second call to the same method will block until a new
+            result object is available for that job. In case you don't want to wait use noblock_get_result()
+        """
+
+        queue, result = self._redis.blpop('cmds_queue_%s' % self.id, timeout)
+        return json.loads(result)
+
+    def noblock_get_result(self):
+        """
+        Returns a list with all available job results (non-blocking)
+        """
+
+        results = self._redis.hgetall('jobresult:%s' % self._id)
+        return map(json.loads, results.values())
 
     def kill(self):
         return self._client.cmd(self._gid, self._nid, 'kill', RunArgs(), {'id': self._id})
@@ -472,14 +486,16 @@ class Client(object):
         """
         assert count > 0, "Invalid count, must be greater than 0"
 
+        def _rmap(r):
+            r = json.loads(r)
+            r.pop('args', None)
+            return r
+
         def _map(s):
             j = json.loads(s)
-            result = self._redis.hget('jobresult', j['id'])
-            if result:
-                result = json.loads(result)
-                result.pop('args', None)
+            result = self._redis.hgetall('jobresult:%s' % j['id'])
 
-            j['result'] = result
+            j['result'] = map(_rmap, result.values())
             return j
 
         return map(_map, self._redis.lrange('joblog', start, start + count - 1))

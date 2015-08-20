@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -65,6 +66,7 @@ type CommandMessage struct {
 }
 
 type CommandResult struct {
+	Id        string `json:"id"`
 	Nid       int    `json:"nid"`
 	Gid       int    `json:"gid"`
 	State     string `json:"state"`
@@ -183,6 +185,8 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 	producersLock.Lock()
 	producer, ok := producers[key]
 	if !ok {
+		igid, _ := strconv.Atoi(gid)
+		inid, _ := strconv.Atoi(nid)
 		//start routine for this agent.
 		producer = make(chan *PollData)
 		producers[key] = producer
@@ -220,14 +224,18 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 					}
 
 					result_placehoder := CommandResult{
-						Gid:       payload.Gid,
-						Nid:       payload.Nid,
+						Id:        payload.Id,
+						Gid:       igid,
+						Nid:       inid,
 						State:     "RUNNING",
 						StartTime: int64(time.Duration(time.Now().UnixNano()) / time.Millisecond),
 					}
 
 					if data, err := json.Marshal(&result_placehoder); err == nil {
-						db.Do("HSET", "jobresult", payload.Id, data)
+						db.Do("HSET",
+							fmt.Sprintf("jobresult:%s", payload.Id),
+							fmt.Sprintf("%d:%d", igid, inid),
+							data)
 					}
 				default:
 					//caller didn't want to receive this command. have to repush it
@@ -345,7 +353,10 @@ func result(c *gin.Context) {
 	log.Printf("[+] message destination [%s]\n", payload.Id)
 
 	// update jobresult
-	db.Do("HSET", "jobresult", payload.Id, content)
+	db.Do("HSET",
+		fmt.Sprintf("jobresult:%s", payload.Id),
+		fmt.Sprintf("%d:%d", payload.Gid, payload.Nid),
+		content)
 
 	// push message to client queue
 	db.Do("RPUSH", fmt.Sprintf("cmds_queue_%s", payload.Id), content)
