@@ -1,6 +1,7 @@
 package main
 
 import (
+	"container/list"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -23,6 +24,11 @@ import (
 
 const (
 	AGENT_INACTIVER_AFTER_OVER = 10 * time.Minute
+	ROLE_ALL                   = "*"
+	COMMANDS_QUEUE             = "cmds_queue"
+	RESULT_QUEUE               = "cmds_queue_%s"
+	LOG_QUEUE                  = "joblog"
+	JOBRESULT_HASH             = "jobresult:%s"
 )
 
 type Settings struct {
@@ -95,7 +101,7 @@ func newPool(addr string, password string) *redis.Pool {
 		MaxIdle:   80,
 		MaxActive: 12000,
 		Dial: func() (redis.Conn, error) {
-			c, err := redis.DialTimeout("tcp", addr, 0, 10*time.Second, 0)
+			c, err := redis.DialTimeout("tcp", addr, 0, 10*time.Minute, 0)
 
 			if err != nil {
 				panic(err.Error())
@@ -119,55 +125,97 @@ func isTimeout(err error) bool {
 	return strings.Contains(err.Error(), "timeout")
 }
 
+func getAgentQueue(gid int, nid int) string {
+	return fmt.Sprintf("cmds:%d:%d", gid, nid)
+}
+
+func getRoleQueue(role string) string {
+	return fmt.Sprintf("cmds:%s", role)
+}
+
+func getGridRoleQueue(gid int, role string) string {
+	return fmt.Sprintf("cmds:%d:%s", gid, role)
+}
+
+func getActiveAgents(onlyGid int) [][]int {
+	producersLock.Lock()
+	defer producersLock.Unlock()
+
+	agents := make([][]int, 0, 10)
+	for key, _ := range producers {
+		var gid, nid int
+		fmt.Sscanf(key, "%d:%d", &gid, &nid)
+		if onlyGid > 0 && onlyGid != gid {
+			continue
+		}
+
+		agents = append(agents, []int{gid, nid})
+	}
+
+	return agents
+}
+
 func readSingleCmd() bool {
 	db := pool.Get()
 	defer db.Close()
 
-	command, err := redis.Strings(db.Do("BLPOP", "cmds_queue", "0"))
+	command, err := redis.Strings(db.Do("BLPOP", COMMANDS_QUEUE, "0"))
 
 	if err != nil {
 		if isTimeout(err) {
 			return true
 		}
-		log.Println("[-] pop error: ", err)
-		return false
+
+		log.Fatal("Coulnd't read new commands from redis", err)
 	}
 
-	log.Println("[+] message payload: ", command[1])
+	log.Println("Received message:", command[1])
 
 	// parsing json data
 	var payload CommandMessage
 	err = json.Unmarshal([]byte(command[1]), &payload)
 
 	if err != nil {
-		log.Println("[-] message decoding: ", err)
+		log.Println("message decoding error:", err)
 		return true
 	}
 
 	//sort command to the consumer queue.
 	//either by role or by the gid/nid.
-	var id string
+	ids := list.New()
+
 	if payload.Role != "" {
 		//command has a given role
-		if payload.Gid == 0 {
-			id = fmt.Sprintf("cmds_queue_%s", payload.Role)
+		if payload.Fanout {
+			//fanning out.
+			active := getActiveAgents(payload.Gid)
+			for _, agent := range active {
+				ids.PushBack(getAgentQueue(agent[0], agent[1]))
+			}
 		} else {
-			id = fmt.Sprintf("cmds_queue_%d_%s", payload.Gid, payload.Role)
+			if payload.Gid == 0 {
+				//no specific Grid id
+				ids.PushBack(getRoleQueue(payload.Role))
+			} else {
+				//no speicif Gid,
+				ids.PushBack(getGridRoleQueue(payload.Gid, payload.Role))
+			}
 		}
 	} else {
-		id = fmt.Sprintf("%d:%d", payload.Gid, payload.Nid)
+		ids.PushBack(getAgentQueue(payload.Gid, payload.Nid))
 	}
 
-	log.Printf("[+] message destination [%s]\n", id)
-
 	// push logs
-	if _, err := db.Do("LPUSH", "joblog", command[1]); err != nil {
+	if _, err := db.Do("LPUSH", LOG_QUEUE, command[1]); err != nil {
 		log.Println("[-] log push error: ", err)
 	}
 
-	// push message to client queue
-	if _, err := db.Do("RPUSH", id, command[1]); err != nil {
-		log.Println("[-] push error: ", err)
+	for e := ids.Front(); e != nil; e = e.Next() {
+		// push message to client queue
+		log.Println("Dispatching message to", e.Value)
+		if _, err := db.Do("RPUSH", e.Value.(string), command[1]); err != nil {
+			log.Println("[-] push error: ", err)
+		}
 	}
 
 	return true
@@ -181,6 +229,17 @@ func cmdreader() {
 			return
 		}
 	}
+}
+
+//Checks if x is in l
+func In(l []string, x string) bool {
+	for i := 0; i < len(l); i++ {
+		if l[i] == x {
+			return true
+		}
+	}
+
+	return false
 }
 
 var producers map[string]chan *PollData = make(map[string]chan *PollData)
@@ -240,16 +299,21 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 					defer close(msgChan)
 
 					roles := data.Roles
-					roles_keys := make([]interface{}, 1, len(roles)*2+2)
-					roles_keys[0] = key
+					roles_keys := make([]interface{}, 1, (len(roles)+1)*2+2)
+					roles_keys[0] = getAgentQueue(igid, inid)
 
 					for _, role := range roles {
 						roles_keys = append(roles_keys,
-							fmt.Sprintf("cmds_queue_%s", role),
-							fmt.Sprintf("cmds_queue_%s_%s", gid, role))
+							getRoleQueue(role),
+							getGridRoleQueue(igid, role))
 					}
 
-					roles_keys = append(roles_keys, "0")
+					//add the ALL/ANY role queue.
+					roles_keys = append(roles_keys,
+						getRoleQueue(ROLE_ALL),
+						getGridRoleQueue(igid, ROLE_ALL),
+						"0")
+
 					db := pool.Get()
 					defer db.Close()
 
@@ -260,6 +324,22 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 						}
 
 						return true
+					}
+
+					// parsing json data
+					var payload CommandMessage
+					err = json.Unmarshal([]byte(pending[1]), &payload)
+
+					//Note, by sending an empty command we are forcing the agent
+					//to start a new poll immediately, it's better than leaving it to timeout if we just
+					//returned true (continued)
+					if err != nil {
+						log.Println("Failed to load command", pending[1])
+						pending[1] = ""
+					}
+
+					if payload.Role != "" && payload.Role != ROLE_ALL && !In(roles, payload.Role) {
+						pending[1] = ""
 					}
 
 					select {
@@ -280,13 +360,16 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 
 						if data, err := json.Marshal(&result_placehoder); err == nil {
 							db.Do("HSET",
-								fmt.Sprintf("jobresult:%s", payload.Id),
-								fmt.Sprintf("%d:%d", igid, inid),
+								fmt.Sprintf(JOBRESULT_HASH, payload.Id),
+								key,
 								data)
 						}
 					default:
 						//caller didn't want to receive this command. have to repush it
-						db.Do("LPUSH", "cmds_queue", pending[1])
+						//directly on the agent queue. to avoid doing the redispatching.
+						if pending[1] != "" {
+							db.Do("LPUSH", getAgentQueue(igid, inid), pending[1])
+						}
 					}
 
 					return true
@@ -374,6 +457,7 @@ func result(c *gin.Context) {
 	gid := c.Param("gid")
 	nid := c.Param("nid")
 
+	key := fmt.Sprintf("%s:%s", gid, nid)
 	db := pool.Get()
 	defer db.Close()
 
@@ -398,19 +482,16 @@ func result(c *gin.Context) {
 		return
 	}
 
-	log.Printf("[+] payload: jobid: %s\n", payload.Id)
-
-	// push body to redis
-	log.Printf("[+] message destination [%s]\n", payload.Id)
+	log.Println("Jobresult:", payload.Id)
 
 	// update jobresult
 	db.Do("HSET",
-		fmt.Sprintf("jobresult:%s", payload.Id),
-		fmt.Sprintf("%d:%d", payload.Gid, payload.Nid),
+		fmt.Sprintf(JOBRESULT_HASH, payload.Id),
+		key,
 		content)
 
-	// push message to client queue
-	db.Do("RPUSH", fmt.Sprintf("cmds_queue_%s", payload.Id), content)
+	// push message to client result queue queue
+	db.Do("RPUSH", fmt.Sprintf(RESULT_QUEUE, payload.Id), content)
 
 	c.JSON(http.StatusOK, "ok")
 }
