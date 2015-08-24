@@ -47,44 +47,10 @@ class RunArgs(object):
         self._recurring_period = recurring_period
         self._stats_interval = stats_interval
         self._args = args
-        self._loglevels = self._expand(loglevels)
-        self._loglevels_db = self._expand(loglevels_db)
-        self._loglevels_ac = self._expand(loglevels_ac)
+        self._loglevels = loglevels
+        self._loglevels_db = loglevels_db
+        self._loglevels_ac = loglevels_ac
         self._queue = queue
-
-    def _expand(self, l):
-        if l is None:
-            return
-
-        if isinstance(l, list):
-            # make sure only valid values are allowed
-            return list(set(l).intersection(LEVELS))
-        elif isinstance(l, basestring):
-            levels = set()
-            for part in l.split(','):
-                lower, _, upper = part.partition('-')
-                lower = lower.strip()
-                upper = upper.strip()
-
-                if lower == '*':
-                    levels.update(LEVELS)
-                    continue
-
-                assert lower.isdigit(), 'Value %s is not digit' % lower
-                lower = int(lower)
-
-                if upper:
-                    # range input
-                    assert upper.isdigit(), 'Upper bound %s is not digit' % upper
-                    upper = int(upper)
-                    if upper > 30:
-                        # trim limit
-                        upper = 30
-                    levels.update(range(lower, upper + 1))
-                    continue
-
-                levels.add(lower)
-            return list(levels.intersection(LEVELS))
 
     @property
     def domain(self):
@@ -116,15 +82,15 @@ class RunArgs(object):
 
     @property
     def loglevels(self):
-        return self._loglevels or []
+        return self._loglevels or ''
 
     @property
     def loglevels_ac(self):
-        return self._loglevels_ac or []
+        return self._loglevels_ac or ''
 
     @property
     def loglevels_db(self):
-        return self._loglevels_db or []
+        return self._loglevels_db or ''
 
     @property
     def queue(self):
