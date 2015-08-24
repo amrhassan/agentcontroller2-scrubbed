@@ -292,6 +292,7 @@ class Client(object):
         :id: id of command for retrieve later, if None a random GUID will be generated.
         :role: Optional role, only agents that satisfy this role can process this job. This is mutual exclusive with
             gid/nid compo in that case, the gid/nid values must be None or a ValueError will be raised.
+            There is a special role '*' which means ANY.
         :fanout: Send job to ALL agents that satisfy the given role. Only effective is role is set.
 
         Allowed compinations
@@ -308,7 +309,7 @@ class Client(object):
         self._redis.rpush('cmds_queue', payload)
         return cmd
 
-    def execute(self, gid, nid, executable, cmdargs=None, args=None, data=None, id=None, role=None):
+    def execute(self, gid, nid, executable, cmdargs=None, args=None, data=None, id=None, role=None, fanout=False):
         """
         Short cut for cmd.execute
         :gid: grid id
@@ -320,15 +321,16 @@ class Client(object):
         :id: Optional command id (see cmd)
         :role: Optional role, only agents that satisfy this role can process this job. This is mutual exclusive with
             gid/nid compo in that case, the gid/nid values must be None or a ValueError will be raised.
+        :fanout: Fanout job to all agents with given role (only effective if role is set)
         """
         if cmdargs is not None and not isinstance(cmdargs, list):
             raise ValueError('cmdargs must be a list')
 
         args = RunArgs().update(args).update({'name': executable, 'args': cmdargs})
 
-        return self.cmd(gid, nid, CMD_EXECUTE, args, data, id, role)
+        return self.cmd(gid, nid, CMD_EXECUTE, args, data, id, role, fanout)
 
-    def execute_js_py(self, gid, nid, domain, name, data=None, args=None, role=None):
+    def execute_js_py(self, gid, nid, domain, name, data=None, args=None, role=None, fanout=False):
         """
         Executes jumpscale script (py) on agent. The execute_js_py extension must be
         enabled and configured correctly on the agent.
@@ -341,7 +343,7 @@ class Client(object):
         :args: Optional run arguments
         """
         args = RunArgs().update(args).update({'domain': domain, 'name': name})
-        return self.cmd(gid, nid, CMD_EXECUTE_JS_PY, args, data, role=role)
+        return self.cmd(gid, nid, CMD_EXECUTE_JS_PY, args, data, role=role, fanout=fanout)
 
     def get_by_id(self, gid, nid, id):
         """
