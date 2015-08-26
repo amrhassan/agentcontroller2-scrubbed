@@ -13,7 +13,7 @@ class ACFactory(object):
         return self.get(**redis)
 
     def getRunArgs(self, domain=None, name=None, max_time=0, max_restart=0, recurring_period=0, stats_interval=0,
-                   args=None, loglevels='*', loglevels_db=None, loglevels_ac=None):
+                   args=None, loglevels='*', loglevels_db=None, loglevels_ac=None, queue=None):
         """
         Creates a reusable run arguments object
 
@@ -31,7 +31,7 @@ class ACFactory(object):
         """
         return acclient.RunArgs(domain=domain, name=name, max_time=max_time, max_restart=max_restart,
                                 recurring_period=recurring_period, stats_interval=stats_interval, args=args,
-                                loglevels=loglevels, loglevels_db=loglevels_db, loglevels_ac=loglevels_ac)
+                                loglevels=loglevels, loglevels_db=loglevels_db, loglevels_ac=loglevels_ac, queue=queue)
 
     def getLegacyClient(self, address='localhost', port=9999, password=None, db=0):
         return LegacyClient(address, port, password, db)
