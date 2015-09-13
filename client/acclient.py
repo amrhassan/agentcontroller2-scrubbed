@@ -22,24 +22,27 @@ LEVELS = range(1, 10) + range(20, 24) + [30]
 
 
 class RunArgs(object):
+    """
+    Creates a new instance of RunArgs
+
+    :param domain: Domain name
+    :param name: script or executable name
+    :param max_time: Max run time, 0 (forever), -1 forever but remember during reboots (long running),
+                   other values is timeout
+    :param max_restart: Max number of restarts if process died in under 5 min.
+    :param recurring_period: Scheduling time
+    :param stats_interval: How frequent the stats aggregation is done/flushed to AC
+    :param args: Command line arguments (in case of execute)
+    :param loglevels: Which log levels to capture and pass to logger
+    :param loglevels_db: Which log levels to store in DB (overrides logger defaults)
+    :param loglevels_ac: Which log levels to send to AC (overrides logger defaults)
+    :param queue: Name of the command queue to wait on.
+
+    This job will not get executed until no other commands running on the same queue.
+    """
     def __init__(self, domain=None, name=None, max_time=0, max_restart=0,
                  recurring_period=0, stats_interval=0, args=None, loglevels='*',
                  loglevels_db=None, loglevels_ac=None, queue=None):
-        """
-        :domain: Domain name
-        :name: script or executable name
-        :max_time: Max run time, 0 (forever), -1 forever but remember during reboots (long running),
-            other values is timeout
-        :max_restart: Max number of restarts if process died in under 5 min.
-        :recurring_period: Scheduling time
-        :stats_interval: How frequent the stats aggregation is done/flushed to AC
-        :args: Command line arguments (in case of execute)
-        :loglevels: Which log levels to capture and pass to logger
-        :loglevels_db: Which log levels to store in DB (overrides logger defaults)
-        :loglevels_ac: Which log levels to send to AC (overrides logger defaults)
-        :queue: Name of the command queue to wait on.
-            This job will not get executed until no other commands running on the same queue.
-        """
         self._domain = domain
         self._name = name
         self._max_time = max_time
@@ -54,49 +57,87 @@ class RunArgs(object):
 
     @property
     def domain(self):
+        """
+        Command domain name
+        """
         return self._domain
 
     @property
     def name(self):
+        """
+        Script or executable name. It's totally up to the ``cmd`` to interpret this
+        """
         return self._name
 
     @property
     def max_time(self):
+        """
+        Max exection time.
+        """
         return self._max_time
 
     @property
     def max_restart(self):
+        """
+        Max number of restarts before agent gives up
+        """
         return self._max_restart
 
     @property
     def recurring_period(self):
+        """
+        How often to run this job (in seconds)
+        """
         return self._recurring_period
 
     @property
     def stats_interval(self):
+        """
+        How frequent the stats aggregation is done/flushed to AC
+        """
         return self._stats_interval
 
     @property
     def args(self):
+        """
+        List of command line arguments (if applicable)
+        """
         return self._args or []
 
     @property
     def loglevels(self):
+        """
+        Log levels to process
+        """
         return self._loglevels or ''
 
     @property
     def loglevels_ac(self):
+        """
+        Which log levels to report back to AC
+        """
         return self._loglevels_ac or ''
 
     @property
     def loglevels_db(self):
+        """
+        Which log levels to store in agent DB
+        """
         return self._loglevels_db or ''
 
     @property
     def queue(self):
+        """
+        Which command queue to wait in (in case of serial exection)
+        """
         return self._queue
 
     def dump(self):
+        """
+        Return run arguments dict
+
+        :rtype: dict
+        """
         dump = {}
         for key in ('domain', 'name', 'max_time', 'max_restart', 'recurring_period',
                     'stats_interval', 'args', 'loglevels', 'loglevels_db', 'loglevels_ac', 'queue'):
@@ -106,6 +147,14 @@ class RunArgs(object):
         return dump
 
     def update(self, args):
+        """
+        Return a new instance of run arguments with updated arguments
+
+        :param args: overrides the current arguments with this set
+        :type args: :class:`acclient.RunArgs` or :class:`dict`
+
+        :rtype: :class:`acclient.RunArgs`
+        """
         base = self.dump()
         if isinstance(args, RunArgs):
             data = args.dump()
@@ -145,10 +194,12 @@ class BaseCmd(object):
         """
         Pops and returns the first available result for that job. It blocks until the result is givent
 
-        :timeout: Waits for this amount of seconds before giving up on results. 0 means wait forever.
-
-        Note: the result is POPed out of the result queue, so a second call to the same method will block until a new
+        The result is POPed out of the result queue, so a second call to the same method will block until a new
             result object is available for that job. In case you don't want to wait use noblock_get_result()
+
+        :param timeout: Waits for this amount of seconds before giving up on results. 0 means wait forever.
+
+        :rtype: dict
         """
 
         queue, result = self._redis.blpop('cmds_queue_%s' % self.id, timeout)
@@ -157,15 +208,24 @@ class BaseCmd(object):
     def noblock_get_result(self):
         """
         Returns a list with all available job results (non-blocking)
+
+        :rtype: list of dicts
         """
 
         results = self._redis.hgetall('jobresult:%s' % self._id)
         return map(json.loads, results.values())
 
     def kill(self):
+        """
+        Kills this command on agent (if it's running)
+        """
         return self._client.cmd(self._gid, self._nid, 'kill', RunArgs(), {'id': self._id})
 
     def get_stats(self):
+        """
+        Gets the job cpu and memory stats on agent. Only valid if job is still running on
+        agent. otherwise will give a 'job id not found' error.
+        """
         stats = self._client.cmd(self._gid, self._nid, 'get_process_stats',
                                  RunArgs(), {'id': self._id}).get_result(GET_INFO_TIMEOUT)
         if stats['state'] != 'SUCCESS':
@@ -176,10 +236,22 @@ class BaseCmd(object):
         return result
 
     def get_msgs(self, levels='*', limit=20):
+        """
+        Gets job log messages from agent
+
+        :param levels: Log levels to retrieve, default to '*' (all)
+        :param limit: Max number of log lines to retrieve (max to 1000)
+
+        :rtype: list of dict
+        """
         return self._client.get_msgs(self._gid, self._nid, jobid=self._id, levels=levels, limit=limit)
 
 
 class Cmd(BaseCmd):
+    """
+    You probably don't need to make an instance of this class manually. Alway use :func:`acclient.Client.cmd` or
+    ony of the client shortcuts.
+    """
     def __init__(self, client, id, gid, nid, cmd, args, data, role, fanout):
         if not isinstance(args, RunArgs):
             raise ValueError('Invalid arguments')
@@ -202,25 +274,45 @@ class Cmd(BaseCmd):
 
     @property
     def cmd(self):
+        """
+        Command name
+        """
         return self._cmd
 
     @property
     def args(self):
+        """
+        Command run arguments
+        """
         return self._args
 
     @property
     def data(self):
+        """
+        Command data
+        """
         return self._data
 
     @property
     def role(self):
+        """
+        Command role
+        """
         return self._role
 
     @property
     def fanout(self):
+        """
+        Either to fanout command
+        """
         return self._fanout
 
     def dump(self):
+        """
+        Gets the command as a dict
+
+        :rtype: dict
+        """
         return {
             'id': self.id,
             'gid': self.gid,
@@ -238,7 +330,12 @@ class Cmd(BaseCmd):
 
 class Client(object):
     """
-    Initialize the redis connection
+    Creates a new client instance. You need a client to send jobs to the agent-controller
+    and to retrieve results
+
+    :param address: Redis host address
+    :param port: Redis port
+    :param password: (optional) redis password
     """
     def __init__(self, address='localhost', port=6379, password=None, db=0):
         # Initializing redis client
@@ -250,22 +347,30 @@ class Client(object):
     def cmd(self, gid, nid, cmd, args, data=None, id=None, role=None, fanout=False):
         """
         Executes a command, return a cmd descriptor
-        :gid: grid id (can be None)
-        :nid: node id (can be None)
-        :cmd: one of the supported commands (execute, execute_js_py, get_?_info, etc...)
-        :args: instance of RunArgs
-        :data: Raw data to send to the command standard input. Passed as objecte and will be dumped as json on wire
-        :id: id of command for retrieve later, if None a random GUID will be generated.
-        :role: Optional role, only agents that satisfy this role can process this job. This is mutual exclusive with
-            gid/nid compo in that case, the gid/nid values must be None or a ValueError will be raised.
-            There is a special role '*' which means ANY.
-        :fanout: Send job to ALL agents that satisfy the given role. Only effective is role is set.
 
-        Allowed compinations
-        [GID|NID|ROLE]
-        [ X | X |  O ] # To specific agent Gid/Nid
-        [ X | O |  X ] # Any agent with that role on this grid
-        [ O | O |  X ] # Any agent with that role globaly
+        :param gid: grid id (can be None)
+        :param nid: node id (can be None)
+        :param cmd: one of the supported commands (execute, execute_js_py, get_x_info, etc...)
+        :param args: instance of RunArgs
+        :param data: Raw data to send to the command standard input. Passed as objecte and will be dumped as json on
+                   wire
+        :param id: id of command for retrieve later, if None a random GUID will be generated.
+        :param role: Optional role, only agents that satisfy this role can process this job. This is mutual exclusive
+                   with gid/nid compo in that case, the gid/nid values must be None or a ValueError will be raised.
+                   There is a special role '*' which means ANY.
+        :param fanout: Send job to ALL agents that satisfy the given role. Only effective is role is set.
+
+        Allowed compinations:
+
+        +-----+-----+------+---------------------------------------+
+        | GID | NID | ROLE | Meaning                               |
+        +=====+=====+======+=======================================+
+        |  X  |  X  |  O   | To specific agent Gid/Nid             |
+        +-----+-----+------+---------------------------------------+
+        |  X  |  O  |  X   | Any agent with that role on this grid |
+        +-----+-----+------+---------------------------------------+
+        |  O  |  O  |  X   | Any agent with that role globaly      |
+        +-----+-----+------+---------------------------------------+
         """
         cmd_id = id or str(uuid.uuid4())
 
@@ -278,16 +383,17 @@ class Client(object):
     def execute(self, gid, nid, executable, cmdargs=None, args=None, data=None, id=None, role=None, fanout=False):
         """
         Short cut for cmd.execute
-        :gid: grid id
-        :nid: node id
-        :executable: the executable to run_args
-        :cmdargs: An optional array with command line arguments
-        :args: Optional RunArgs
-        :data: Raw data to the command stdin. (see cmd)
-        :id: Optional command id (see cmd)
-        :role: Optional role, only agents that satisfy this role can process this job. This is mutual exclusive with
-            gid/nid compo in that case, the gid/nid values must be None or a ValueError will be raised.
-        :fanout: Fanout job to all agents with given role (only effective if role is set)
+
+        :param gid: grid id
+        :param nid: node id
+        :param executable: the executable to run_args
+        :param cmdargs: An optional array with command line arguments
+        :param args: Optional RunArgs
+        :param data: Raw data to the command stdin. (see cmd)
+        :param id: Optional command id (see cmd)
+        :param role: Optional role, only agents that satisfy this role can process this job. This is mutual exclusive
+                   with gid/nid compo in that case, the gid/nid values must be None or a ValueError will be raised.
+        :param fanout: Fanout job to all agents with given role (only effective if role is set)
         """
         if cmdargs is not None and not isinstance(cmdargs, list):
             raise ValueError('cmdargs must be a list')
@@ -301,12 +407,12 @@ class Client(object):
         Executes jumpscale script (py) on agent. The execute_js_py extension must be
         enabled and configured correctly on the agent.
 
-        :gid: Grid id
-        :nid: Node id
-        :domain: Domain of script
-        :name: Name of script
-        :data: Data object (any json serializabl struct) that will be sent to the script.
-        :args: Optional run arguments
+        :param gid: Grid id
+        :param nid: Node id
+        :param domain: Domain of script
+        :param name: Name of script
+        :param data: Data object (any json serializabl struct) that will be sent to the script.
+        :param args: Optional run arguments
         """
         args = RunArgs().update(args).update({'domain': domain, 'name': name})
         return self.cmd(gid, nid, CMD_EXECUTE_JS_PY, args, data, role=role, fanout=fanout)
@@ -314,6 +420,7 @@ class Client(object):
     def get_by_id(self, gid, nid, id):
         """
         Get a command descriptor by an ID. So you can read command result later if the ID is known.
+        :rtype: :class:`acclient.BaseCmd`
         """
         return BaseCmd(self, id, gid, nid)
 
@@ -367,14 +474,15 @@ class Client(object):
     def get_msgs(self, gid, nid, jobid=None, timefrom=None, timeto=None, levels='*', limit=20):
         """
         Query and return log messages stored on agent side.
-        :gid: Grid id
-        :nid: Node id
-        :jobid: Optional jobid
-        :timefrom: Optional time from (unix timestamp in seconds)
-        :timeto: Optional time to (unix timestamp in seconds)
-        :levels: Levels to return (ex: 1,2,3 or 1,2,6-9 or * for all)
-        :limit: Max number of log messages to return. Note that the agent in anyways will not return
-            more than 1000 record
+
+        :param gid: Grid id
+        :param nid: Node id
+        :param jobid: Optional jobid
+        :param timefrom: Optional time from (unix timestamp in seconds)
+        :param timeto: Optional time to (unix timestamp in seconds)
+        :param levels: Levels to return (ex: 1,2,3 or 1,2,6-9 or * for all)
+        :param limit: Max number of log messages to return. Note that the agent in anyways will not return
+         more than 1000 record
         """
 
         query = {
@@ -399,15 +507,15 @@ class Client(object):
 
         Note: The agent will proxy the connection over the agent-controller it recieved this open command from.
 
-        :gid: Grid id
-        :nid: Node id
-        :local: Agent's local listening port for the tunnel. 0 for dynamic allocation
-        :gateway: The other endpoint `agent` which the connection will be redirected to.
-            This should be the name of the hubble agent.
-            NOTE: if the endpoint is another superangent, it automatically names itself as '<gid>.<nid>'
-        :ip: The endpoint ip address on the remote agent network. Note that IP must be a real ip not a host name
-            dns names lookup is not supported.
-        :remote: The endpoint port on the remote agent network
+        :param gid: Grid id
+        :param nid: Node id
+        :param local: Agent's local listening port for the tunnel. 0 for dynamic allocation
+        :param gateway: The other endpoint `agent` which the connection will be redirected to.
+                      This should be the name of the hubble agent.
+                      NOTE: if the endpoint is another superangent, it automatically names itself as '<gid>.<nid>'
+        :param ip: The endpoint ip address on the remote agent network. Note that IP must be a real ip not a host name
+                 dns names lookup is not supported.
+        :param remote: The endpoint port on the remote agent network
         """
 
         request = {
@@ -429,7 +537,7 @@ class Client(object):
         real open port returned by the tunnel_open function. Otherwise the agent will not match the tunnel and return
         ignore your call.
 
-        Note: closing a non-existing tunnel is not an error.
+        Closing a non-existing tunnel is not an error.
         """
         request = {
             'local': int(local),
@@ -459,8 +567,8 @@ class Client(object):
         change the `start` and `count` argument to thinking of the jobs history as a list where
         the most recent job is at index 0
 
-        :start: Start index to retrieve, default 0
-        :count: Number of jobs to retrieve
+        :param start: Start index to retrieve, default 0
+        :param count: Number of jobs to retrieve
         """
         assert count > 0, "Invalid count, must be greater than 0"
 
