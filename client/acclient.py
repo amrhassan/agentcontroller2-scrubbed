@@ -5,8 +5,7 @@ import uuid
 GET_INFO_TIMEOUT = 60
 
 CMD_EXECUTE = 'execute'
-CMD_EXECUTE_JS_PY = 'execute_js_py'
-CMD_EXECUTE_JS_LUA = 'execute_js_lua'
+CMD_EXECUTE_JUMPSCRIPT = 'jumpscript'
 CMD_GET_CPU_INFO = 'get_cpu_info'
 CMD_GET_NIC_INFO = 'get_nic_info'
 CMD_GET_OS_INFO = 'get_os_info'
@@ -170,6 +169,10 @@ class RunArgs(object):
 
 
 class BaseCmd(object):
+    """
+    Base command. You never need to create an instance of this class, always use :func:`acclient.Client.cmd` or any of
+    the other shortcuts.
+    """
     def __init__(self, client, id, gid, nid):
         self._client = client
         self._redis = client._redis
@@ -180,14 +183,23 @@ class BaseCmd(object):
 
     @property
     def id(self):
+        """
+        Command ID
+        """
         return self._id
 
     @property
     def gid(self):
+        """
+        Grid ID
+        """
         return self._gid
 
     @property
     def nid(self):
+        """
+        Node ID
+        """
         return self._nid
 
     def get_result(self, timeout=0):
@@ -249,6 +261,8 @@ class BaseCmd(object):
 
 class Cmd(BaseCmd):
     """
+    Child of :class:`acclient.BaseCmd`
+
     You probably don't need to make an instance of this class manually. Alway use :func:`acclient.Client.cmd` or
     ony of the client shortcuts.
     """
@@ -371,6 +385,8 @@ class Client(object):
         +-----+-----+------+---------------------------------------+
         |  O  |  O  |  X   | Any agent with that role globaly      |
         +-----+-----+------+---------------------------------------+
+
+        :rtype: :class:`acclient.Cmd`
         """
         cmd_id = id or str(uuid.uuid4())
 
@@ -402,7 +418,7 @@ class Client(object):
 
         return self.cmd(gid, nid, CMD_EXECUTE, args, data, id, role, fanout)
 
-    def execute_js_py(self, gid, nid, domain, name, data=None, args=None, role=None, fanout=False):
+    def execute_jumpscript(self, gid, nid, domain, name, data=None, args=None, role=None, fanout=False):
         """
         Executes jumpscale script (py) on agent. The execute_js_py extension must be
         enabled and configured correctly on the agent.
@@ -413,13 +429,19 @@ class Client(object):
         :param name: Name of script
         :param data: Data object (any json serializabl struct) that will be sent to the script.
         :param args: Optional run arguments
+        :type args: :class:`acclient.RunArgs`
+        :param role: Optional role, only agents that satisfy this role can process this job. This is mutual exclusive
+                   with gid/nid compo in that case, the gid/nid values must be None or a ValueError will be raised.
+                   chceck :func:`acclient.Client.cmd` for more info.
+        :param fanout: Fanout job to all agents with given role (only effective if role is set)
         """
         args = RunArgs().update(args).update({'domain': domain, 'name': name})
-        return self.cmd(gid, nid, CMD_EXECUTE_JS_PY, args, data, role=role, fanout=fanout)
+        return self.cmd(gid, nid, CMD_EXECUTE_JUMPSCRIPT, args, data, role=role, fanout=fanout)
 
     def get_by_id(self, gid, nid, id):
         """
         Get a command descriptor by an ID. So you can read command result later if the ID is known.
+
         :rtype: :class:`acclient.BaseCmd`
         """
         return BaseCmd(self, id, gid, nid)
