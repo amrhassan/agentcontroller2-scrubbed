@@ -130,5 +130,7 @@ def startup(gid, nid):
             logging.warn('Error syncthing jumpscripts folder on agent: %s' % result['data'])
             continue
 
+    client.cmd(gid, nid, 'sync', default.update({'name': 'restart'}))
+
 if __name__ == '__main__':
     utils.run(startup)
