@@ -168,18 +168,12 @@ class RunArgs(object):
         return RunArgs(**base)
 
 
-class BaseCmd(object):
-    """
-    Base command. You never need to create an instance of this class, always use :func:`acclient.Client.cmd` or any of
-    the other shortcuts.
-    """
+class Base(object):
     def __init__(self, client, id, gid, nid):
         self._client = client
-        self._redis = client._redis
         self._id = id
         self._gid = 0 if gid is None else int(gid)
         self._nid = 0 if nid is None else int(nid)
-        self._result = None
 
     @property
     def id(self):
@@ -202,30 +196,79 @@ class BaseCmd(object):
         """
         return self._nid
 
-    def get_result(self, timeout=0):
+
+class Job(Base):
+    """
+    Job Information
+    """
+    def __init__(self, client, jobdata):
+        super(Job, self).__init__(client, jobdata['id'], jobdata['gid'], jobdata['nid'])
+        self._jobdata = jobdata
+        args = jobdata.get('args')
+        self._args = RunArgs(**args) if args else None
+
+    @property
+    def starttime(self):
         """
-        Pops and returns the first available result for that job. It blocks until the result is givent
-
-        The result is POPed out of the result queue, so a second call to the same method will block until a new
-            result object is available for that job. In case you don't want to wait use noblock_get_result()
-
-        :param timeout: Waits for this amount of seconds before giving up on results. 0 means wait forever.
-
-        :rtype: dict
+        Job starttime
         """
+        return self._jobdata['starttime']
 
-        queue, result = self._redis.blpop('cmds_queue_%s' % self.id, timeout)
-        return json.loads(result)
-
-    def noblock_get_result(self):
+    @property
+    def state(self):
         """
-        Returns a list with all available job results (non-blocking)
-
-        :rtype: list of dicts
+        Job state
         """
+        self._update()
+        return self._jobdata['state']
 
-        results = self._redis.hgetall('jobresult:%s' % self._id)
-        return map(json.loads, results.values())
+    def _update(self):
+        state = self._jobdata['state']
+        if state is None or state == 'RUNNING':
+            job = self._client.get_cmd_jobs(self.id)[(self.gid, self.nid)]
+            self._jobdata = job._jobdata
+
+    @property
+    def args(self):
+        """
+        Job args
+        """
+        if self._args is None:
+            self._update()
+            if 'args' in self._jobdata:
+                self._args = RunArgs(**self._jobdata['args'])
+        return self._args
+
+    @property
+    def level(self):
+        """
+        Job level
+        """
+        self._update()
+        return self._jobdata['level']
+
+    @property
+    def cmd(self):
+        """
+        Job cmd
+        """
+        return self._jobdata['cmd']
+
+    @property
+    def time(self):
+        """
+        Job runtime in miliseconds
+        """
+        self._update()
+        return self._jobdata['time']
+
+    @property
+    def data(self):
+        """
+        Job data
+        """
+        self._update()
+        return self._jobdata['data']
 
     def kill(self):
         """
@@ -236,15 +279,17 @@ class BaseCmd(object):
     def get_stats(self):
         """
         Gets the job cpu and memory stats on agent. Only valid if job is still running on
-        agent. otherwise will give a 'job id not found' error.
+        agent. otherwise will give an error.
         """
+        if self.state != 'RUNNING':
+            raise Exception('Can only get stats on running jobs')
         stats = self._client.cmd(self._gid, self._nid, 'get_process_stats',
-                                 RunArgs(), {'id': self._id}).get_result(GET_INFO_TIMEOUT)
-        if stats['state'] != 'SUCCESS':
-            raise Exception(stats['data'])
+                                 RunArgs(), {'id': self._id}).get_next_result(GET_INFO_TIMEOUT)
+        if stats.state != 'SUCCESS':
+            raise Exception(stats.data)
 
         # TODO: parsing data should be always based on the level
-        result = json.loads(stats['data'])
+        result = json.loads(stats.data)
         return result
 
     def get_msgs(self, levels='*', limit=20):
@@ -257,6 +302,26 @@ class BaseCmd(object):
         :rtype: list of dict
         """
         return self._client.get_msgs(self._gid, self._nid, jobid=self._id, levels=levels, limit=limit)
+
+    def __repr__(self):
+        return "<Job at 0x%x <<%s:%s %s>>" % (id(self), self.gid, self.nid, self.id)
+
+
+class BaseCmd(Base):
+    """
+    Base command. You never need to create an instance of this class, always use :func:`acclient.Client.cmd` or any of
+    the other shortcuts.
+    """
+    def __init__(self, client, id, gid, nid):
+        super(BaseCmd, self).__init__(client, id, gid, nid)
+
+    def get_jobs(self):
+        """
+        Returns a list with all available job results
+
+        :rtype: dict of :class:`acclient.Job`
+        """
+        return self._client.get_cmd_jobs(self._id)
 
 
 class Cmd(BaseCmd):
@@ -285,6 +350,34 @@ class Cmd(BaseCmd):
         self._data = data
         self._role = role
         self._fanout = fanout
+
+    def iter_results(self, timeout=0):
+        """
+        Iterate over the jobs. It blocks until the job is finished
+
+        :param timeout: Waits for this amount of seconds before giving up on results. 0 means wait forever.
+
+        :rtype: dict
+        """
+
+        yield self.get_next_result()
+        remaining = len(self.get_jobs()) - 1
+        for x in range(remaining):
+            yield self.get_next_result()
+
+    def get_next_result(self, timeout=0):
+        """
+        Pops and returns the first available result for that job. It blocks until the result is givent
+
+        The result is POPed out of the result queue, so a second call to the same method will block until a new
+            result object is available for that job. In case you don't want to wait use noblock_get_next_result()
+
+        :param timeout: Waits for this amount of seconds before giving up on results. 0 means wait forever.
+
+        :rtype: dict
+        """
+        queue, result = self._client._redis.blpop('cmds_queue_%s' % self.id, timeout)
+        return Job(self._client, json.loads(result))
 
     @property
     def cmd(self):
@@ -389,7 +482,6 @@ class Client(object):
         :rtype: :class:`acclient.Cmd`
         """
         cmd_id = id or str(uuid.uuid4())
-
         cmd = Cmd(self, cmd_id, gid, nid, cmd, args, data, role, fanout)
 
         payload = json.dumps(cmd.dump())
@@ -450,36 +542,49 @@ class Client(object):
         """
         Get CPU info of the agent node
         """
-        result = self.cmd(gid, nid, CMD_GET_CPU_INFO, RunArgs()).get_result(GET_INFO_TIMEOUT)
-        return json.loads(result['data'])
+        result = self.cmd(gid, nid, CMD_GET_CPU_INFO, RunArgs()).get_next_result(GET_INFO_TIMEOUT)
+        return json.loads(result.data)
 
     def get_disk_info(self, gid, nid):
         """
         Get disk info of the agent node
         """
-        result = self.cmd(gid, nid, CMD_GET_DISK_INFO, RunArgs()).get_result(GET_INFO_TIMEOUT)
-        return json.loads(result['data'])
+        result = self.cmd(gid, nid, CMD_GET_DISK_INFO, RunArgs()).get_next_result(GET_INFO_TIMEOUT)
+        return json.loads(result.data)
 
     def get_mem_info(self, gid, nid):
         """
         Get MEM info of the agent node
         """
-        result = self.cmd(gid, nid, CMD_GET_MEM_INFO, RunArgs()).get_result(GET_INFO_TIMEOUT)
-        return json.loads(result['data'])
+        result = self.cmd(gid, nid, CMD_GET_MEM_INFO, RunArgs()).get_next_result(GET_INFO_TIMEOUT)
+        return json.loads(result.data)
 
     def get_nic_info(self, gid, nid):
         """
         Get NIC info of the agent node
         """
-        result = self.cmd(gid, nid, CMD_GET_NIC_INFO, RunArgs()).get_result(GET_INFO_TIMEOUT)
-        return json.loads(result['data'])
+        result = self.cmd(gid, nid, CMD_GET_NIC_INFO, RunArgs()).get_next_result(GET_INFO_TIMEOUT)
+        return json.loads(result.data)
 
     def get_os_info(self, gid, nid):
         """
         Get OS info of the agent node
         """
-        result = self.cmd(gid, nid, CMD_GET_OS_INFO, RunArgs()).get_result(GET_INFO_TIMEOUT)
-        return json.loads(result['data'])
+        result = self.cmd(gid, nid, CMD_GET_OS_INFO, RunArgs()).get_next_result(GET_INFO_TIMEOUT)
+        return json.loads(result.data)
+
+    def get_cmd_jobs(self, id):
+        """
+        Returns a dict with all available job results
+
+        :rtype: dict of :class:`acclient.Job`
+        """
+        def wrap_jobs(jobresult):
+            result = json.loads(jobresult)
+            return (result['gid'], result['nid']), Job(self, result)
+
+        results = self._redis.hgetall('jobresult:%s' % id)
+        return dict(map(wrap_jobs, results.values()))
 
     def get_processes(self, gid, nid, domain=None, name=None):
         """
@@ -490,8 +595,8 @@ class Client(object):
             'name': name
         }
 
-        result = self.cmd(gid, nid, CMD_GET_PROCESSES_STATS, RunArgs(), data).get_result(GET_INFO_TIMEOUT)
-        return json.loads(result['data'])
+        result = self.cmd(gid, nid, CMD_GET_PROCESSES_STATS, RunArgs(), data).get_next_result(GET_INFO_TIMEOUT)
+        return json.loads(result.data)
 
     def get_msgs(self, gid, nid, jobid=None, timefrom=None, timeto=None, levels='*', limit=20):
         """
@@ -515,11 +620,11 @@ class Client(object):
             'limit': limit
         }
 
-        result = self.cmd(gid, nid, CMD_GET_MSGS, RunArgs(), query).get_result()
-        if result['state'] != 'SUCCESS':
-            raise Exception(result['data'])
+        result = self.cmd(gid, nid, CMD_GET_MSGS, RunArgs(), query).get_next_result()
+        if result.state != 'SUCCESS':
+            raise Exception(result.data)
 
-        return json.loads(result['data'])
+        return json.loads(result.data)
 
     def tunnel_open(self, gid, nid, local, gateway, ip, remote):
         """
@@ -547,11 +652,11 @@ class Client(object):
             'remote': int(remote)
         }
 
-        result = self.cmd(gid, nid, CMD_TUNNEL_OPEN, RunArgs(), request).get_result(GET_INFO_TIMEOUT)
-        if result['state'] != 'SUCCESS':
-            raise Exception(result['data'])
+        result = self.cmd(gid, nid, CMD_TUNNEL_OPEN, RunArgs(), request).get_next_result(GET_INFO_TIMEOUT)
+        if result.state != 'SUCCESS':
+            raise Exception(result.data)
 
-        return json.loads(result['data'])
+        return json.loads(result.data)
 
     def tunnel_close(self, gid, nid, local, gateway, ip, remote):
         """
@@ -568,24 +673,24 @@ class Client(object):
             'remote': int(remote)
         }
 
-        result = self.cmd(gid, nid, CMD_TUNNEL_CLOSE, RunArgs(), request).get_result(GET_INFO_TIMEOUT)
-        if result['state'] != 'SUCCESS':
-            raise Exception(result['data'])
+        result = self.cmd(gid, nid, CMD_TUNNEL_CLOSE, RunArgs(), request).get_next_result(GET_INFO_TIMEOUT)
+        if result.state != 'SUCCESS':
+            raise Exception(result.data)
 
     def tunnel_list(self, gid, nid):
         """
         Return all opened connection that are open from the agent over the agent-controller it
         received this command from
         """
-        result = self.cmd(gid, nid, CMD_TUNNEL_LIST, RunArgs()).get_result(GET_INFO_TIMEOUT)
-        if result['state'] != 'SUCCESS':
-            raise Exception(result['data'])
+        result = self.cmd(gid, nid, CMD_TUNNEL_LIST, RunArgs()).get_next_result(GET_INFO_TIMEOUT)
+        if result.state != 'SUCCESS':
+            raise Exception(result.data)
 
-        return json.loads(result['data'])
+        return json.loads(result.data)
 
-    def get_jobs(self, start=0, count=100):
+    def get_cmds(self, start=0, count=100):
         """
-        Retrieves jobs losgs. This by default returns the latest 100 jobs. You can
+        Retrieves cmds history. This by default returns the latest 100 cmds. You can
         change the `start` and `count` argument to thinking of the jobs history as a list where
         the most recent job is at index 0
 
@@ -596,14 +701,13 @@ class Client(object):
 
         def _rmap(r):
             r = json.loads(r)
-            r.pop('args', None)
-            return r
+            return Job(self, r)
 
         def _map(s):
             j = json.loads(s)
             result = self._redis.hgetall('jobresult:%s' % j['id'])
 
-            j['result'] = map(_rmap, result.values())
+            j['jobs'] = map(_rmap, result.values())
             return j
 
         return map(_map, self._redis.lrange('joblog', start, start + count - 1))
