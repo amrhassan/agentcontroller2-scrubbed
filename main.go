@@ -543,11 +543,23 @@ func stats(c *gin.Context) {
 
 	for _, stats := range payload {
 		for i := 0; i < len(stats.Series); i++ {
+			var value float64
+			switch v := stats.Series[i][1].(type) {
+			case int:
+				value = float64(v)
+			case float32:
+				value = float64(v)
+			case float64:
+				value = v
+			default:
+				log.Println("Invalid influxdb value %v", v)
+			}
+
 			point := influxdb.Point{
 				Measurement: stats.Series[i][0].(string),
 				Time:        time.Unix(stats.Timestamp, 0),
 				Fields: map[string]interface{}{
-					"value": stats.Series[i][1],
+					"value": value,
 				},
 			}
 
