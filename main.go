@@ -574,7 +574,7 @@ func stats(c *gin.Context) {
 	}
 
 	if _, err := con.Write(batchPoints); err != nil {
-		log.Println(err)
+		log.Println("INFLUXDB ERROR:", err)
 		return
 	}
 
