@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/Jumpscale/agentcontroller2/influxdb-client-0.8.8"
+	influxdb "github.com/Jumpscale/agentcontroller2/influxdb"
 	hubbleAuth "github.com/Jumpscale/hubble/auth"
 	hubble "github.com/Jumpscale/hubble/proxy"
 	"github.com/garyburd/redigo/redis"
@@ -14,6 +14,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
@@ -512,7 +513,7 @@ func stats(c *gin.Context) {
 	}
 
 	// decode body
-	var payload StatsRequest
+	var payload []StatsRequest
 	err = json.Unmarshal(content, &payload)
 
 	if err != nil {
@@ -521,36 +522,46 @@ func stats(c *gin.Context) {
 		return
 	}
 
+	u, err := url.Parse(fmt.Sprintf("http://%s", settings.Influxdb.Host))
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
 	// building Influxdb requests
-	con, err := client.NewClient(&client.ClientConfig{
+	con, err := influxdb.NewClient(influxdb.Config{
 		Username: settings.Influxdb.User,
 		Password: settings.Influxdb.Password,
-		Database: settings.Influxdb.Db,
-		Host:     settings.Influxdb.Host,
+		URL:      *u,
 	})
 
 	if err != nil {
 		log.Println(err)
 	}
 
-	var timestamp = payload.Timestamp
-	seriesList := make([]*client.Series, len(payload.Series))
+	points := make([]influxdb.Point, 0, 100)
 
-	for i := 0; i < len(payload.Series); i++ {
-		series := &client.Series{
-			Name:    payload.Series[i][0].(string),
-			Columns: []string{"time", "value"},
-			// FIXME: add all points then write once
-			Points: [][]interface{}{{
-				timestamp * 1000, //influx expects time in ms
-				payload.Series[i][1],
-			}},
+	for _, stats := range payload {
+		for i := 0; i < len(stats.Series); i++ {
+			point := influxdb.Point{
+				Measurement: stats.Series[i][0].(string),
+				Time:        time.Unix(stats.Timestamp, 0),
+				Fields: map[string]interface{}{
+					"value": stats.Series[i][1],
+				},
+			}
+
+			points = append(points, point)
 		}
-
-		seriesList[i] = series
 	}
 
-	if err := con.WriteSeries(seriesList); err != nil {
+	batchPoints := influxdb.BatchPoints{
+		Points:          points,
+		Database:        settings.Influxdb.Db,
+		RetentionPolicy: "default",
+	}
+
+	if _, err := con.Write(batchPoints); err != nil {
 		log.Println(err)
 		return
 	}
