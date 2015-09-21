@@ -11,4 +11,5 @@ github.com/naoina/toml 5667c316ee9576e9d5bca793ce4ec813a88ce7d3
 github.com/ugorji/go 3bf34b310f3f1eef0e3981ddf6f6c79e2b907b02
 github.com/yuin/gopher-lua ae75ff57e4677bbd787adc57f47635e6bcefcfca
 golang.org/x/net e0403b4e005737430c05a57aac078479844f919c
+github.com/influxdb/influxdb 9679431c18289bbbf2dd0f2cee071225631bb0bb
 gopkg.in/bluesuncorp/validator.v5 d8e0c4d93696f467eedc43f7f954b48eb6fe6ba8
