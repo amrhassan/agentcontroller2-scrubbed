@@ -23,11 +23,11 @@ SHARE_FOLDERS = {
 
 
 def results_or_die(results):
-    if results['state'] != 'SUCCESS':
-        raise Exception('Error executing cmd %s.%s: %s' % (results['cmd'], results['args']['name'], results['data']))
-    assert results['level'] == 20, 'Only json response is supported so far'
+    if results.state != 'SUCCESS':
+        raise Exception('Error executing cmd %s.%s: %s' % (results.cmd, results.args.name, results.data))
+    assert results.level == 20, 'Only json response is supported so far'
 
-    return json.loads(results['data'])
+    return json.loads(results.data)
 
 
 def get_url(endpoint):
@@ -55,7 +55,7 @@ def startup(gid, nid):
 
     get_id = client.cmd(gid, nid, 'sync', default.update({'name': 'get_id'}))
 
-    agent_device_id = results_or_die(get_id.get_result(30))
+    agent_device_id = results_or_die(get_id.get_next_result(30))
 
     endpoint = get_url(ENDPOINT_CONFIG)
     response = sessions.get(endpoint, headers=headers)
@@ -125,9 +125,9 @@ def startup(gid, nid):
             'path': remote_path
         }
 
-        result = client.cmd(gid, nid, 'sync', default.update({'name': 'sync_folder'}), data).get_result()
-        if result['state'] != 'SUCCESS':
-            logging.warn('Error syncthing jumpscripts folder on agent: %s' % result['data'])
+        result = client.cmd(gid, nid, 'sync', default.update({'name': 'sync_folder'}), data).get_next_result()
+        if result.state != 'SUCCESS':
+            logging.warn('Error syncthing jumpscripts folder on agent: %s' % result.data)
             continue
 
     client.cmd(gid, nid, 'sync', default.update({'name': 'restart'}))
