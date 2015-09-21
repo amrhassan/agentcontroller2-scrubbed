@@ -5,9 +5,9 @@ redis_password = ""
 
 [influxdb]
 host = "127.0.0.1:8086"
-db   = "agentcontroller"
-user = "ac"
-password = "acctrl"
+db   = "main"
+user = "root"
+password = "rooter"
 
 [handlers]
 binary = "python2.7"
