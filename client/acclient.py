@@ -292,7 +292,7 @@ class Job(Base):
         result = json.loads(stats.data)
         return result
 
-    def get_msgs(self, levels='*', limit=20):
+    def get_msgs(self, limit=20):
         """
         Gets job log messages from agent
 
@@ -301,7 +301,7 @@ class Job(Base):
 
         :rtype: list of dict
         """
-        return self._client.get_msgs(self._gid, self._nid, jobid=self._id, levels=levels, limit=limit)
+        return self._client.get_msgs(self._gid, self._nid, jobid=self._id, limit=limit)
 
     def __repr__(self):
         return "<Job at 0x%x <<%s:%s %s>>" % (id(self), self.gid, self.nid, self.id)
@@ -598,25 +598,19 @@ class Client(object):
         result = self.cmd(gid, nid, CMD_GET_PROCESSES_STATS, RunArgs(), data).get_next_result(GET_INFO_TIMEOUT)
         return json.loads(result.data)
 
-    def get_msgs(self, gid, nid, jobid=None, timefrom=None, timeto=None, levels='*', limit=20):
+    def get_msgs(self, gid, nid, jobid, limit=20):
         """
         Query and return log messages stored on agent side.
 
         :param gid: Grid id
         :param nid: Node id
-        :param jobid: Optional jobid
-        :param timefrom: Optional time from (unix timestamp in seconds)
-        :param timeto: Optional time to (unix timestamp in seconds)
-        :param levels: Levels to return (ex: 1,2,3 or 1,2,6-9 or * for all)
+        :param jobid: Job id
         :param limit: Max number of log messages to return. Note that the agent in anyways will not return
          more than 1000 record
         """
 
         query = {
             'jobid': jobid,
-            'timefrom': timefrom,
-            'timeto': timeto,
-            'levels': levels,
             'limit': limit
         }
 
