@@ -6,6 +6,7 @@ GET_INFO_TIMEOUT = 60
 
 CMD_EXECUTE = 'execute'
 CMD_EXECUTE_JUMPSCRIPT = 'jumpscript'
+CMD_EXECUTE_LEGACY_JUMPSCRIPT = 'legacy'
 CMD_GET_CPU_INFO = 'get_cpu_info'
 CMD_GET_NIC_INFO = 'get_nic_info'
 CMD_GET_OS_INFO = 'get_os_info'
@@ -529,6 +530,29 @@ class Client(object):
         """
         args = RunArgs().update(args).update({'domain': domain, 'name': name})
         return self.cmd(gid, nid, CMD_EXECUTE_JUMPSCRIPT, args, data, role=role, fanout=fanout)
+
+    def execute_legacy_jumpscript(self, gid, nid, domain, name, data=None, args=None, role=None, fanout=False):
+        """
+        Executes jumpscale script (py) on agent. The execute_js_py extension must be
+        enabled and configured correctly on the agent.
+
+        The only way this is different from the 'execute_jumpscript' is how the data to the script is handled and
+        how it's passed to the script. Also this finds the script to execute under the /legacy folder of the agent.
+
+        :param gid: Grid id
+        :param nid: Node id
+        :param domain: Domain of script
+        :param name: Name of script
+        :param data: Data object (any json serializabl struct) that will be sent to the script.
+        :param args: Optional run arguments
+        :type args: :class:`acclient.RunArgs`
+        :param role: Optional role, only agents that satisfy this role can process this job. This is mutual exclusive
+                   with gid/nid compo in that case, the gid/nid values must be None or a ValueError will be raised.
+                   chceck :func:`acclient.Client.cmd` for more info.
+        :param fanout: Fanout job to all agents with given role (only effective if role is set)
+        """
+        args = RunArgs().update(args).update({'domain': domain, 'name': name})
+        return self.cmd(gid, nid, CMD_EXECUTE_LEGACY_JUMPSCRIPT, args, data, role=role, fanout=fanout)
 
     def get_by_id(self, gid, nid, id):
         """
