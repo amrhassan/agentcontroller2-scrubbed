@@ -7,7 +7,7 @@ redis_password = ""
 host = "127.0.0.1:8086"
 db   = "main"
 user = "root"
-password = "rooter"
+password = "root"
 
 [handlers]
 binary = "python2.7"
