@@ -32,6 +32,8 @@ const (
 	JOBRESULT_HASH             = "jobresult:%s"
 )
 
+var TAGS = []string{"gid", "nid", "command", "domain", "name", "measurement"}
+
 type Settings struct {
 	Main struct {
 		Listen        string
@@ -555,9 +557,19 @@ func stats(c *gin.Context) {
 				log.Println("Invalid influxdb value %v", v)
 			}
 
+			key := stats.Series[i][0].(string)
+			//key is formated as gid.nid.cmd.domain.name.[measuerment] (6 parts)
+			//so we can split it and then fill the gags.
+			tags := make(map[string]string)
+			tagsValues := strings.SplitN(key, ".", 6)
+			for i, tagValue := range tagsValues {
+				tags[TAGS[i]] = tagValue
+			}
+
 			point := influxdb.Point{
-				Measurement: stats.Series[i][0].(string),
+				Measurement: key,
 				Time:        time.Unix(stats.Timestamp, 0),
+				Tags:        tags,
 				Fields: map[string]interface{}{
 					"value": value,
 				},
