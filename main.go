@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	AGENT_INACTIVER_AFTER_OVER = 10 * time.Minute
+	AGENT_INACTIVER_AFTER_OVER = 1 * time.Minute
 	ROLE_ALL                   = "*"
 	COMMANDS_QUEUE             = "cmds_queue"
 	RESULT_QUEUE               = "cmds_queue_%s"
@@ -77,6 +77,7 @@ type CommandMessage struct {
 	Id     string `json:"id"`
 	Gid    int    `json:"gid"`
 	Nid    int    `json:"nid"`
+	Cmd    string `json:"cmd"`
 	Role   string `json:"role"`
 	Fanout bool   `json:"fanout"`
 }
@@ -86,6 +87,7 @@ type CommandResult struct {
 	Nid       int    `json:"nid"`
 	Gid       int    `json:"gid"`
 	State     string `json:"state"`
+	Data      string `json:"data"`
 	StartTime int64  `json:"starttime"`
 }
 
@@ -105,7 +107,7 @@ func newPool(addr string, password string) *redis.Pool {
 		MaxIdle:   80,
 		MaxActive: 12000,
 		Dial: func() (redis.Conn, error) {
-			c, err := redis.DialTimeout("tcp", addr, 0, 10*time.Minute, 0)
+			c, err := redis.DialTimeout("tcp", addr, 0, 30*time.Second, 0)
 
 			if err != nil {
 				panic(err.Error())
@@ -182,6 +184,35 @@ func readSingleCmd() bool {
 	if err != nil {
 		log.Println("message decoding error:", err)
 		return true
+	}
+
+	if payload.Nid != 0 {
+		//command to specific node.
+		key := fmt.Sprintf("%d:%d", payload.Gid, payload.Nid)
+		_, ok := producers[key]
+		if !ok {
+			//send error message to
+			result := &CommandResult{
+				Id:        payload.Id,
+				Gid:       payload.Gid,
+				Nid:       payload.Nid,
+				State:     "ERROR",
+				Data:      fmt.Sprintf("Agent is not alive!"),
+				StartTime: int64(time.Duration(time.Now().UnixNano()) / time.Millisecond),
+			}
+
+			if data, err := json.Marshal(&result); err == nil {
+				db.Do("HSET",
+					fmt.Sprintf(JOBRESULT_HASH, payload.Id),
+					key,
+					data)
+
+				// push message to client result queue queue
+				db.Do("RPUSH", fmt.Sprintf(RESULT_QUEUE, payload.Id), data)
+			}
+
+			return true
+		}
 	}
 
 	//sort command to the consumer queue.
@@ -295,7 +326,7 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 					case data = <-producer:
 					case <-time.After(AGENT_INACTIVER_AFTER_OVER):
 						//no active agent for 10 min
-						log.Println("Agent", key, "is inactive for over 10 min, cleaning up.")
+						log.Println("Agent", key, "is inactive for over ", AGENT_INACTIVER_AFTER_OVER, " seconds, cleaning up.")
 						return false
 					}
 
@@ -599,6 +630,10 @@ func event(c *gin.Context) {
 	nid := c.Param("nid")
 
 	log.Printf("[+] gin: event (gid: %s, nid: %s)\n", gid, nid)
+
+	//force initializing of producer since the event is the first thing agent sends
+
+	getProducerChan(gid, nid)
 
 	content, err := ioutil.ReadAll(c.Request.Body)
 
