@@ -15,10 +15,16 @@ key: local folder id
 value: remote path to where to share on agent side.
 
 Currently we only share legacy and jumpscripts folder to agent
+
+SHARE_FOLDERS {
+    folder_id: folder_path
+}
+
+folder_path is relative to agent-home but can be set as full path if started with /
 """
 SHARE_FOLDERS = {
-    'legacy': '/opt/jumpscale7/apps/agent2/legacy',
-    'jumpscripts': '/opt/jumpscale7/apps/agent2/jumpscripts'
+    'legacy': 'legacy',
+    'jumpscripts': 'jumpscripts'
 }
 
 
@@ -119,10 +125,13 @@ def startup(gid, nid):
     # to register this instance of syncthing on agent as well. We can do this via a simple agent command
 
     for folder_id, remote_path in SHARE_FOLDERS.iteritems():
+        # NOTE: the address is set to 127.0.0.1:33000 because the agent automatically opens a tunnel
+        # to the master node (this machine)
         data = {
             'device_id': local_device_id,
             'folder_id': folder_id,
-            'path': remote_path
+            'path': remote_path,
+            'address': '127.0.0.1:33000',
         }
 
         result = client.cmd(gid, nid, 'sync', default.update({'name': 'sync_folder'}), data).get_next_result()

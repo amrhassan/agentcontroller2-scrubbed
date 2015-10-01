@@ -295,7 +295,7 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 					case data = <-producer:
 					case <-time.After(AGENT_INACTIVER_AFTER_OVER):
 						//no active agent for 10 min
-						log.Printf("Agent", key, "is inactive for over 10 min, cleaning up.\n", gid, nid)
+						log.Println("Agent", key, "is inactive for over 10 min, cleaning up.")
 						return false
 					}
 
