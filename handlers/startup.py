@@ -3,7 +3,7 @@ import requests
 import logging
 
 import utils
-import acclient
+from JumpScale import j
 
 ENDPOINT_CONFIG = '/rest/system/config'
 ENDPOINT_RESTART = '/rest/system/restart'
@@ -56,8 +56,8 @@ def startup(gid, nid):
     if api_key is not None:
         headers['X-API-Key'] = api_key
 
-    client = acclient.Client(**utils.settings['redis'])
-    default = acclient.RunArgs(domain='jumpscale')
+    client = j.clients.ac.get(**utils.settings['redis'])
+    default = j.clients.ac.getRunArgs(domain='jumpscale')
 
     get_id = client.cmd(gid, nid, 'sync', default.update({'name': 'get_id'}))
 
