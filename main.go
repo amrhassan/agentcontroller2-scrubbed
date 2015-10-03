@@ -25,12 +25,13 @@ import (
 )
 
 const (
-	AGENT_INACTIVER_AFTER_OVER = 1 * time.Minute
+	AGENT_INACTIVER_AFTER_OVER = 30 * time.Second
 	ROLE_ALL                   = "*"
 	COMMANDS_QUEUE             = "cmds_queue"
 	RESULT_QUEUE               = "cmds_queue_%s"
 	LOG_QUEUE                  = "joblog"
 	JOBRESULT_HASH             = "jobresult:%s"
+	INTERNAL_COMMAND           = "controller"
 )
 
 var TAGS = []string{"gid", "nid", "command", "domain", "name", "measurement"}
@@ -80,6 +81,9 @@ type CommandMessage struct {
 	Cmd    string `json:"cmd"`
 	Role   string `json:"role"`
 	Fanout bool   `json:"fanout"`
+	Args   struct {
+		name string
+	} `json:"args"`
 }
 
 type CommandResult struct {
@@ -107,7 +111,7 @@ func newPool(addr string, password string) *redis.Pool {
 		MaxIdle:   80,
 		MaxActive: 12000,
 		Dial: func() (redis.Conn, error) {
-			c, err := redis.DialTimeout("tcp", addr, 0, 30*time.Second, 0)
+			c, err := redis.DialTimeout("tcp", addr, 0, AGENT_INACTIVER_AFTER_OVER/2, 0)
 
 			if err != nil {
 				panic(err.Error())
@@ -143,10 +147,11 @@ func getGridRoleQueue(gid int, role string) string {
 	return fmt.Sprintf("cmds:%d:%s", gid, role)
 }
 
-func getActiveAgents(onlyGid int) [][]int {
+func getActiveAgents(onlyGid int, role string) [][]int {
 	producersLock.Lock()
 	defer producersLock.Unlock()
 
+	checkRole := role != "" && role != ROLE_ALL
 	agents := make([][]int, 0, 10)
 	for key, _ := range producers {
 		var gid, nid int
@@ -155,10 +160,52 @@ func getActiveAgents(onlyGid int) [][]int {
 			continue
 		}
 
+		if checkRole {
+			roles := producersRoles[key]
+			match := false
+			for _, r := range roles {
+				if r == role {
+					match = true
+					break
+				}
+			}
+			if !match {
+				continue
+			}
+		}
 		agents = append(agents, []int{gid, nid})
 	}
 
 	return agents
+}
+
+func sendResult(result *CommandResult) {
+	db := pool.Get()
+	defer db.Close()
+
+	key := fmt.Sprintf("%d:%d", result.Gid, result.Nid)
+	if data, err := json.Marshal(&result); err == nil {
+		db.Do("HSET",
+			fmt.Sprintf(JOBRESULT_HASH, result.Id),
+			key,
+			data)
+
+		// push message to client result queue queue
+		db.Do("RPUSH", fmt.Sprintf(RESULT_QUEUE, result.Id), data)
+	}
+}
+
+func internal_list_agents(cmd *CommandMessage) (interface{}, error) {
+
+	return nil, nil
+}
+
+var internals = map[string]func(*CommandMessage) (interface{}, error){
+	"list_agents": internal_list_agents,
+}
+
+func processInternalCommand(command CommandMessage) {
+
 }
 
 func readSingleCmd() bool {
@@ -186,8 +233,42 @@ func readSingleCmd() bool {
 		return true
 	}
 
-	if payload.Nid != 0 {
-		//command to specific node.
+	//sort command to the consumer queue.
+	//either by role or by the gid/nid.
+	ids := list.New()
+
+	if payload.Role != "" {
+		//command has a given role
+		active := getActiveAgents(payload.Gid, payload.Role)
+		if len(active) == 0 {
+			//no active agents that saticifies this role.
+			result := &CommandResult{
+				Id:        payload.Id,
+				Gid:       payload.Gid,
+				Nid:       payload.Nid,
+				State:     "ERROR",
+				Data:      fmt.Sprintf("No agents with role '%s' alive!", payload.Role),
+				StartTime: int64(time.Duration(time.Now().UnixNano()) / time.Millisecond),
+			}
+
+			sendResult(result)
+		} else {
+			if payload.Fanout {
+				//fanning out.
+				for _, agent := range active {
+					ids.PushBack(getAgentQueue(agent[0], agent[1]))
+				}
+
+			} else {
+				if payload.Gid == 0 {
+					ids.PushBack(getRoleQueue(payload.Role))
+				} else {
+					//speicific Gid,
+					ids.PushBack(getGridRoleQueue(payload.Gid, payload.Role))
+				}
+			}
+		}
+	} else {
 		key := fmt.Sprintf("%d:%d", payload.Gid, payload.Nid)
 		_, ok := producers[key]
 		if !ok {
@@ -201,43 +282,10 @@ func readSingleCmd() bool {
 				StartTime: int64(time.Duration(time.Now().UnixNano()) / time.Millisecond),
 			}
 
-			if data, err := json.Marshal(&result); err == nil {
-				db.Do("HSET",
-					fmt.Sprintf(JOBRESULT_HASH, payload.Id),
-					key,
-					data)
-
-				// push message to client result queue queue
-				db.Do("RPUSH", fmt.Sprintf(RESULT_QUEUE, payload.Id), data)
-			}
-
-			return true
-		}
-	}
-
-	//sort command to the consumer queue.
-	//either by role or by the gid/nid.
-	ids := list.New()
-
-	if payload.Role != "" {
-		//command has a given role
-		if payload.Fanout {
-			//fanning out.
-			active := getActiveAgents(payload.Gid)
-			for _, agent := range active {
-				ids.PushBack(getAgentQueue(agent[0], agent[1]))
-			}
+			sendResult(result)
 		} else {
-			if payload.Gid == 0 {
-				//no specific Grid id
-				ids.PushBack(getRoleQueue(payload.Role))
-			} else {
-				//no speicif Gid,
-				ids.PushBack(getGridRoleQueue(payload.Gid, payload.Role))
-			}
+			ids.PushBack(getAgentQueue(payload.Gid, payload.Nid))
 		}
-	} else {
-		ids.PushBack(getAgentQueue(payload.Gid, payload.Nid))
 	}
 
 	// push logs
@@ -278,6 +326,10 @@ func In(l []string, x string) bool {
 }
 
 var producers map[string]chan *PollData = make(map[string]chan *PollData)
+var producersRoles map[string][]string = make(map[string][]string)
+
+// var activeRoles map[string]int = make(map[string]int)
+// var activeGridRoles map[string]map[string]int = make(map[string]map[string]int)
 var producersLock sync.Mutex
 
 /**
@@ -316,6 +368,7 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 				producersLock.Lock()
 				defer producersLock.Unlock()
 				delete(producers, key)
+				delete(producersRoles, key)
 			}()
 
 			for {
@@ -326,7 +379,7 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 					case data = <-producer:
 					case <-time.After(AGENT_INACTIVER_AFTER_OVER):
 						//no active agent for 10 min
-						log.Println("Agent", key, "is inactive for over ", AGENT_INACTIVER_AFTER_OVER, " seconds, cleaning up.")
+						log.Println("Agent", key, "is inactive for over ", AGENT_INACTIVER_AFTER_OVER, ", cleaning up.")
 						return false
 					}
 
@@ -334,6 +387,7 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 					defer close(msgChan)
 
 					roles := data.Roles
+					producersRoles[key] = roles
 					roles_keys := make([]interface{}, 1, (len(roles)+1)*2+2)
 					roles_keys[0] = getAgentQueue(igid, inid)
 
