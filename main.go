@@ -14,6 +14,7 @@ import (
 	"github.com/naoina/toml"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
@@ -75,14 +76,14 @@ func LoadTomlFile(filename string, v interface{}) {
 
 // data types
 type CommandMessage struct {
-	Id     string `json:"id"`
-	Gid    int    `json:"gid"`
-	Nid    int    `json:"nid"`
-	Cmd    string `json:"cmd"`
-	Role   string `json:"role"`
-	Fanout bool   `json:"fanout"`
+	Id     string   `json:"id"`
+	Gid    int      `json:"gid"`
+	Nid    int      `json:"nid"`
+	Cmd    string   `json:"cmd"`
+	Roles  []string `json:"roles"`
+	Fanout bool     `json:"fanout"`
 	Args   struct {
-		name string
+		Name string `json:"name"`
 	} `json:"args"`
 }
 
@@ -147,11 +148,11 @@ func getGridRoleQueue(gid int, role string) string {
 	return fmt.Sprintf("cmds:%d:%s", gid, role)
 }
 
-func getActiveAgents(onlyGid int, role string) [][]int {
+func getActiveAgents(onlyGid int, roles []string) [][]int {
 	producersLock.Lock()
 	defer producersLock.Unlock()
 
-	checkRole := role != "" && role != ROLE_ALL
+	checkRole := len(roles) > 0 && roles[0] != ROLE_ALL
 	agents := make([][]int, 0, 10)
 	for key, _ := range producers {
 		var gid, nid int
@@ -161,11 +162,11 @@ func getActiveAgents(onlyGid int, role string) [][]int {
 		}
 
 		if checkRole {
-			roles := producersRoles[key]
-			match := false
+			agentRoles := producersRoles[key]
+			match := true
 			for _, r := range roles {
-				if r == role {
-					match = true
+				if !In(agentRoles, r) {
+					match = false
 					break
 				}
 			}
@@ -196,8 +197,7 @@ func sendResult(result *CommandResult) {
 }
 
 func internal_list_agents(cmd *CommandMessage) (interface{}, error) {
-
-	return nil, nil
+	return producersRoles, nil
 }
 
 var internals = map[string]func(*CommandMessage) (interface{}, error){
@@ -205,7 +205,32 @@ var internals = map[string]func(*CommandMessage) (interface{}, error){
 }
 
 func processInternalCommand(command CommandMessage) {
+	result := &CommandResult{
+		Id:        command.Id,
+		Gid:       command.Gid,
+		Nid:       command.Nid,
+		State:     "ERROR",
+		StartTime: int64(time.Duration(time.Now().UnixNano()) / time.Millisecond),
+	}
 
+	internal, ok := internals[command.Args.Name]
+	if ok {
+		data, err := internal(&command)
+		if err != nil {
+			result.Data = err.Error()
+		} else {
+			serialized, err := json.Marshal(data)
+			if err != nil {
+				result.Data = err.Error()
+			}
+			result.State = "SUCCESS"
+			result.Data = string(serialized)
+		}
+	} else {
+		result.State = "UNKNOWN_CMD"
+	}
+
+	sendResult(result)
 }
 
 func readSingleCmd() bool {
@@ -233,13 +258,17 @@ func readSingleCmd() bool {
 		return true
 	}
 
+	if payload.Cmd == INTERNAL_COMMAND {
+		go processInternalCommand(payload)
+		return true
+	}
 	//sort command to the consumer queue.
 	//either by role or by the gid/nid.
 	ids := list.New()
 
-	if payload.Role != "" {
+	if len(payload.Roles) > 0 {
 		//command has a given role
-		active := getActiveAgents(payload.Gid, payload.Role)
+		active := getActiveAgents(payload.Gid, payload.Roles)
 		if len(active) == 0 {
 			//no active agents that saticifies this role.
 			result := &CommandResult{
@@ -247,7 +276,7 @@ func readSingleCmd() bool {
 				Gid:       payload.Gid,
 				Nid:       payload.Nid,
 				State:     "ERROR",
-				Data:      fmt.Sprintf("No agents with role '%s' alive!", payload.Role),
+				Data:      fmt.Sprintf("No agents with role '%v' alive!", payload.Roles),
 				StartTime: int64(time.Duration(time.Now().UnixNano()) / time.Millisecond),
 			}
 
@@ -260,12 +289,8 @@ func readSingleCmd() bool {
 				}
 
 			} else {
-				if payload.Gid == 0 {
-					ids.PushBack(getRoleQueue(payload.Role))
-				} else {
-					//speicific Gid,
-					ids.PushBack(getGridRoleQueue(payload.Gid, payload.Role))
-				}
+				agent := active[rand.Intn(len(active))]
+				ids.PushBack(getAgentQueue(agent[0], agent[1]))
 			}
 		}
 	} else {
@@ -388,47 +413,17 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 
 					roles := data.Roles
 					producersRoles[key] = roles
-					roles_keys := make([]interface{}, 1, (len(roles)+1)*2+2)
-					roles_keys[0] = getAgentQueue(igid, inid)
-
-					for _, role := range roles {
-						roles_keys = append(roles_keys,
-							getRoleQueue(role),
-							getGridRoleQueue(igid, role))
-					}
-
-					//add the ALL/ANY role queue.
-					roles_keys = append(roles_keys,
-						getRoleQueue(ROLE_ALL),
-						getGridRoleQueue(igid, ROLE_ALL),
-						"0")
 
 					db := pool.Get()
 					defer db.Close()
 
-					pending, err := redis.Strings(db.Do("BLPOP", roles_keys...))
+					pending, err := redis.Strings(db.Do("BLPOP", getAgentQueue(igid, inid), "0"))
 					if err != nil {
 						if !isTimeout(err) {
 							log.Println("Couldn't get new job for agent", key, err)
 						}
 
 						return true
-					}
-
-					// parsing json data
-					var payload CommandMessage
-					err = json.Unmarshal([]byte(pending[1]), &payload)
-
-					//Note, by sending an empty command we are forcing the agent
-					//to start a new poll immediately, it's better than leaving it to timeout if we just
-					//returned true (continued)
-					if err != nil {
-						log.Println("Failed to load command", pending[1])
-						pending[1] = ""
-					}
-
-					if payload.Role != "" && payload.Role != ROLE_ALL && !In(roles, payload.Role) {
-						pending[1] = ""
 					}
 
 					select {
