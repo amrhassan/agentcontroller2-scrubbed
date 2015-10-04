@@ -28,8 +28,9 @@ import (
 const (
 	AGENT_INACTIVER_AFTER_OVER = 30 * time.Second
 	ROLE_ALL                   = "*"
-	COMMANDS_QUEUE             = "cmds_queue"
-	RESULT_QUEUE               = "cmds_queue_%s"
+	COMMANDS_QUEUE             = "cmds.queue"
+	JOBS_QUEUED_QUEUE          = "cmd.%s.queued"
+	AGENT_RESULT_QUEUE         = "cmd.%s.%d.%d"
 	LOG_QUEUE                  = "joblog"
 	JOBRESULT_HASH             = "jobresult:%s"
 	INTERNAL_COMMAND           = "controller"
@@ -140,12 +141,8 @@ func getAgentQueue(gid int, nid int) string {
 	return fmt.Sprintf("cmds:%d:%d", gid, nid)
 }
 
-func getRoleQueue(role string) string {
-	return fmt.Sprintf("cmds:%s", role)
-}
-
-func getGridRoleQueue(gid int, role string) string {
-	return fmt.Sprintf("cmds:%d:%s", gid, role)
+func getAgentResultQueue(result *CommandResult) string {
+	return fmt.Sprintf(AGENT_RESULT_QUEUE, result.Id, result.Gid, result.Nid)
 }
 
 func getActiveAgents(onlyGid int, roles []string) [][]int {
@@ -192,7 +189,7 @@ func sendResult(result *CommandResult) {
 			data)
 
 		// push message to client result queue queue
-		db.Do("RPUSH", fmt.Sprintf(RESULT_QUEUE, result.Id), data)
+		db.Do("RPUSH", getAgentResultQueue(result), data)
 	}
 }
 
@@ -285,12 +282,12 @@ func readSingleCmd() bool {
 			if payload.Fanout {
 				//fanning out.
 				for _, agent := range active {
-					ids.PushBack(getAgentQueue(agent[0], agent[1]))
+					ids.PushBack(agent)
 				}
 
 			} else {
 				agent := active[rand.Intn(len(active))]
-				ids.PushBack(getAgentQueue(agent[0], agent[1]))
+				ids.PushBack(agent)
 			}
 		}
 	} else {
@@ -309,7 +306,7 @@ func readSingleCmd() bool {
 
 			sendResult(result)
 		} else {
-			ids.PushBack(getAgentQueue(payload.Gid, payload.Nid))
+			ids.PushBack([]int{payload.Gid, payload.Nid})
 		}
 	}
 
@@ -318,14 +315,35 @@ func readSingleCmd() bool {
 		log.Println("[-] log push error: ", err)
 	}
 
+	//distribution to agents.
 	for e := ids.Front(); e != nil; e = e.Next() {
 		// push message to client queue
-		log.Println("Dispatching message to", e.Value)
-		if _, err := db.Do("RPUSH", e.Value.(string), command[1]); err != nil {
+		agent := e.Value.([]int)
+		gid := agent[0]
+		nid := agent[1]
+
+		log.Println("Dispatching message to", agent)
+		if _, err := db.Do("RPUSH", getAgentQueue(gid, nid), command[1]); err != nil {
 			log.Println("[-] push error: ", err)
+		}
+
+		result_placehoder := CommandResult{
+			Id:        payload.Id,
+			Gid:       gid,
+			Nid:       nid,
+			State:     "QUEUED",
+			StartTime: int64(time.Duration(time.Now().UnixNano()) / time.Millisecond),
+		}
+
+		if data, err := json.Marshal(&result_placehoder); err == nil {
+			db.Do("HSET",
+				fmt.Sprintf(JOBRESULT_HASH, payload.Id),
+				fmt.Sprintf("%d:%d", gid, nid),
+				data)
 		}
 	}
 
+	db.Do("RPUSH", fmt.Sprintf(JOBS_QUEUED_QUEUE, payload.Id), "queued")
 	return true
 }
 
@@ -557,7 +575,7 @@ func result(c *gin.Context) {
 	}
 
 	// decode body
-	var payload CommandMessage
+	var payload CommandResult
 	err = json.Unmarshal(content, &payload)
 
 	if err != nil {
@@ -574,8 +592,8 @@ func result(c *gin.Context) {
 		key,
 		content)
 
-	// push message to client result queue queue
-	db.Do("RPUSH", fmt.Sprintf(RESULT_QUEUE, payload.Id), content)
+	// push message to client main result queue
+	db.Do("RPUSH", getAgentResultQueue(&payload), content)
 
 	c.JSON(http.StatusOK, "ok")
 }
