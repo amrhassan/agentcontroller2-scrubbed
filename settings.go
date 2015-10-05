@@ -50,6 +50,7 @@ func LoadSettingsFromTomlFile(filename string) (settings Settings, err error) {
 
 }
 
+//TLSEnabled returns true if a Cert and Key are configured in the TLS settings
 func (settings Settings) TLSEnabled() bool {
 	return settings.TLS.Cert != "" && settings.TLS.Key != ""
 }

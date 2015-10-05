@@ -779,9 +779,6 @@ func main() {
 	if err != nil {
 		log.Panicln("Error loading concfiguration file:", err)
 	}
-	if !settings.TLSEnabled() {
-		log.Println("[WARNING] TLS not enabled, don't do this on production environments")
-	}
 
 	log.Printf("[+] webservice: <%s>\n", settings.Main.Listen)
 	log.Printf("[+] redis server: <%s>\n", settings.Main.RedisHost)
@@ -835,5 +832,11 @@ func main() {
 
 	agent.Start(onExit)
 
-	router.Run(settings.Main.Listen)
+	server := &http.Server{Addr: settings.Main.Listen, Handler: router}
+	if settings.TLSEnabled() {
+		server.ListenAndServeTLS(settings.TLS.Cert, settings.TLS.Key)
+	} else {
+		log.Println("[WARNING] TLS not enabled, don't do this on production environments")
+		server.ListenAndServe()
+	}
 }

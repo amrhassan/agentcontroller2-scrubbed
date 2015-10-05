@@ -5,8 +5,8 @@ redis_password = ""
 
 [tls]
 #If specified, enable ssl
-#cert = "/path/to/certficate.cert"
-#key = "path/to/keyfile.key"
+#cert = "/path/to/certificate.cert"
+#key = "/path/to/keyfile.key"
 
 [influxdb]
 host = "127.0.0.1:8086"
