@@ -23,7 +23,7 @@ SHARE_FOLDERS {
 folder_path is relative to agent-home but can be set as full path if started with /
 """
 SHARE_FOLDERS = {
-    'legacy': 'legacy',
+    # 'legacy': 'legacy',
     'jumpscripts': 'jumpscripts'
 }
 
@@ -56,7 +56,7 @@ def startup(gid, nid):
     if api_key is not None:
         headers['X-API-Key'] = api_key
 
-    client = j.clients.ac.get(**utils.settings['redis'])
+    client = j.clients.ac.getAdvanced(**utils.settings['redis'])
     default = j.clients.ac.getRunArgs(domain='jumpscale')
 
     get_id = client.cmd(gid, nid, 'sync', default.update({'name': 'get_id'}))
@@ -134,7 +134,10 @@ def startup(gid, nid):
             'address': '127.0.0.1:33000',
         }
 
-        result = client.cmd(gid, nid, 'sync', default.update({'name': 'sync_folder'}), data).get_next_result()
+        result = client.cmd(gid, nid,
+                            'sync', default.update({'name': 'sync_folder'}),
+                            json.dumps(data)).get_next_result()
+
         if result.state != 'SUCCESS':
             logging.warn('Error syncthing jumpscripts folder on agent: %s' % result.data)
             continue

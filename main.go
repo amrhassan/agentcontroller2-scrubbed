@@ -57,6 +57,7 @@ type CommandResult struct {
 	Gid       int    `json:"gid"`
 	State     string `json:"state"`
 	Data      string `json:"data"`
+	Level     int    `json:"level"`
 	StartTime int64  `json:"starttime"`
 }
 
@@ -185,12 +186,20 @@ func processInternalCommand(command CommandMessage) {
 			}
 			result.State = "SUCCESS"
 			result.Data = string(serialized)
+			result.Level = 20
 		}
 	} else {
 		result.State = "UNKNOWN_CMD"
 	}
 
 	sendResult(result)
+	signalQueues(command.Id)
+}
+
+func signalQueues(id string) {
+	db := pool.Get()
+	defer db.Close()
+	db.Do("RPUSH", fmt.Sprintf(JOBS_QUEUED_QUEUE, id), "queued")
 }
 
 func readSingleCmd() bool {
@@ -306,7 +315,7 @@ func readSingleCmd() bool {
 		}
 	}
 
-	db.Do("RPUSH", fmt.Sprintf(JOBS_QUEUED_QUEUE, payload.Id), "queued")
+	signalQueues(payload.Id)
 	return true
 }
 
@@ -702,6 +711,11 @@ func event(c *gin.Context) {
 		log.Println("Failed to open process stderr", err)
 	}
 
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		log.Println("Failed to open process stderr", err)
+	}
+
 	log.Println("Starting handler for", payload.Name, "event, for agent", gid, nid)
 	err = cmd.Start()
 	if err != nil {
@@ -710,13 +724,20 @@ func event(c *gin.Context) {
 		go func() {
 			//wait for command to exit.
 			cmderrors, err := ioutil.ReadAll(stderr)
-			if len(cmderrors) > 0 {
-				log.Printf("%s(%s:%s): %s", payload.Name, gid, nid, cmderrors)
+			if err != nil {
+				log.Println(err)
+			}
+
+			cmdoutput, err := ioutil.ReadAll(stdout)
+			if err != nil {
+				log.Println(err)
 			}
 
 			err = cmd.Wait()
 			if err != nil {
 				log.Println("Failed to handle ", payload.Name, " event for agent: ", gid, nid, err)
+				log.Println(string(cmdoutput))
+				log.Println(string(cmderrors))
 			}
 		}()
 	}
