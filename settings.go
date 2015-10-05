@@ -7,18 +7,23 @@ import (
 	"github.com/naoina/toml"
 )
 
+//HTTPBinding defines the address that should be bound on and optional tls certificates
+type HTTPBinding struct {
+	Address string
+	TLS     []struct {
+		Cert string
+		Key  string
+	}
+}
+
 //Settings are the configurable options for the AgentController
 type Settings struct {
 	Main struct {
-		Listen        string
 		RedisHost     string
 		RedisPassword string
 	}
 
-	TLS struct {
-		Cert string
-		Key  string
-	}
+	Listen []HTTPBinding
 
 	Influxdb struct {
 		Host     string
@@ -50,7 +55,7 @@ func LoadSettingsFromTomlFile(filename string) (settings Settings, err error) {
 
 }
 
-//TLSEnabled returns true if a Cert and Key are configured in the TLS settings
-func (settings Settings) TLSEnabled() bool {
-	return settings.TLS.Cert != "" && settings.TLS.Key != ""
+//TLSEnabled returns true if a Cert and Key are configured in the binding settings
+func (httpBinding HTTPBinding) TLSEnabled() bool {
+	return len(httpBinding.TLS) > 0
 }

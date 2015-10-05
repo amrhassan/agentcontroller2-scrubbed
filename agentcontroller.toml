@@ -1,12 +1,20 @@
 [main]
-listen = ":8966"
 redis_host =  "127.0.0.1:6379"
 redis_password = ""
 
-[tls]
-#If specified, enable ssl
-#cert = "/path/to/certificate.cert"
-#key = "/path/to/keyfile.key"
+#Default http
+[[listen]]
+  Address = ":8966"
+
+#Example for https with multiple virtual hosts
+#[[listen]]
+#  Address = ":8443"
+#  [[listen.tls]]
+#    cert = "/path/to/domain1_certificate.cert"
+#    key = "/path/to/domain1_keyfile.key"
+#  [[listen.tls]]
+#    cert = "/path/to/domain2_certificate.cert"
+#    key = "/path/to/domain2_keyfile.key"
 
 [influxdb]
 host = "127.0.0.1:8086"

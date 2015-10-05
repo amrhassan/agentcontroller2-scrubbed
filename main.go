@@ -2,12 +2,14 @@ package main
 
 import (
 	"container/list"
+	"crypto/tls"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -17,7 +19,6 @@ import (
 	"sync"
 	"time"
 
-	hublleAgent "github.com/Jumpscale/hubble/agent"
 	hubbleAuth "github.com/Jumpscale/hubble/auth"
 	hublleProxy "github.com/Jumpscale/hubble/proxy"
 	"github.com/garyburd/redigo/redis"
@@ -781,7 +782,6 @@ func main() {
 		log.Panicln("Error loading concfiguration file:", err)
 	}
 
-	log.Printf("[+] webservice: <%s>\n", settings.Main.Listen)
 	log.Printf("[+] redis server: <%s>\n", settings.Main.RedisHost)
 
 	pool = newPool(settings.Main.RedisHost, settings.Main.RedisPassword)
@@ -807,37 +807,67 @@ func main() {
 	// router.Static("/doc", "./doc")
 
 	//start the builtin hubble agent so agents can open tunnels to master(controller) nodes.
-	ipport := strings.Split(settings.Main.Listen, ":")
-	if len(ipport) != 2 {
-		log.Fatalf("Invalid listen address %s\n", settings.Main.Listen)
+	//TODO: integrate with the the new http binding
+	// ipport := strings.Split(settings.Main.Listen, ":")
+	// if len(ipport) != 2 {
+	// 	log.Fatalf("Invalid listen address %s\n", settings.Main.Listen)
+	// }
+	//
+	// hubbleIp := "127.0.0.1"
+	// if ipport[0] != "" {
+	// 	hubbleIp = ipport[0]
+	// }
+	//
+	// wsURL := fmt.Sprintf("ws://%s:%s/0/0/hubble", hubbleIp, ipport[1])
+	// log.Println("Starting local hubble agent at", wsURL)
+	// agent := hublleAgent.NewAgent(wsURL, "controller", "", nil)
+	// var onExit func(agt hublleAgent.Agent, err error)
+	//
+	// onExit = func(agt hublleAgent.Agent, err error) {
+	// 	if err != nil {
+	// 		go func() {
+	// 			time.Sleep(3 * time.Second)
+	// 			agt.Start(onExit)
+	// 		}()
+	// 	}
+	// }
+	//
+	//agent.Start(onExit)
+
+	var wg sync.WaitGroup
+	wg.Add(len(settings.Listen))
+	for _, httpBinding := range settings.Listen {
+		go func(httpBinding HTTPBinding) {
+			server := &http.Server{Addr: httpBinding.Address, Handler: router}
+			if httpBinding.TLSEnabled() {
+				server.TLSConfig = &tls.Config{}
+				server.TLSConfig.Certificates = make([]tls.Certificate, len(httpBinding.TLS), len(httpBinding.TLS))
+				for certificateIndex, tlsSetting := range httpBinding.TLS {
+					certificate, err := tls.LoadX509KeyPair(tlsSetting.Cert, tlsSetting.Key)
+					if err != nil {
+						log.Panicln("Unable to load certificate", err)
+					}
+					server.TLSConfig.Certificates[certificateIndex] = certificate
+				}
+				ln, err := net.Listen("tcp", server.Addr)
+				if err != nil {
+					log.Panicln(err)
+				}
+
+				tlsListener := tls.NewListener(ln, server.TLSConfig)
+				log.Println("Listening on", httpBinding.Address, "with TLS")
+				if err := server.Serve(tlsListener); err != nil {
+					log.Panicln(err)
+				}
+				wg.Done()
+			} else {
+				log.Println("Listening on", httpBinding.Address)
+				if err := server.ListenAndServe(); err != nil {
+					log.Panicln(err)
+				}
+				wg.Done()
+			}
+		}(httpBinding)
 	}
-
-	hubbleIp := "127.0.0.1"
-	if ipport[0] != "" {
-		hubbleIp = ipport[0]
-	}
-
-	wsURL := fmt.Sprintf("ws://%s:%s/0/0/hubble", hubbleIp, ipport[1])
-	log.Println("Starting local hubble agent at", wsURL)
-	agent := hublleAgent.NewAgent(wsURL, "controller", "", nil)
-	var onExit func(agt hublleAgent.Agent, err error)
-
-	onExit = func(agt hublleAgent.Agent, err error) {
-		if err != nil {
-			go func() {
-				time.Sleep(3 * time.Second)
-				agt.Start(onExit)
-			}()
-		}
-	}
-
-	agent.Start(onExit)
-
-	server := &http.Server{Addr: settings.Main.Listen, Handler: router}
-	if settings.TLSEnabled() {
-		server.ListenAndServeTLS(settings.TLS.Cert, settings.TLS.Key)
-	} else {
-		log.Println("[WARNING] TLS not enabled, don't do this on production environments")
-		server.ListenAndServe()
-	}
+	wg.Wait()
 }
