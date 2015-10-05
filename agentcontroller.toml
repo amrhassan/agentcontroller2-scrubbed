@@ -3,6 +3,11 @@ listen = ":8966"
 redis_host =  "127.0.0.1:6379"
 redis_password = ""
 
+[tls]
+#If specified, enable ssl
+#cert = "/path/to/certficate.cert"
+#key = "path/to/keyfile.key"
+
 [influxdb]
 host = "127.0.0.1:8086"
 db   = "main"

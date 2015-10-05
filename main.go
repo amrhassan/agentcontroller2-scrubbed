@@ -5,13 +5,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	hublleAgent "github.com/Jumpscale/hubble/agent"
-	hubbleAuth "github.com/Jumpscale/hubble/auth"
-	hublleProxy "github.com/Jumpscale/hubble/proxy"
-	"github.com/garyburd/redigo/redis"
-	"github.com/gin-gonic/gin"
-	influxdb "github.com/influxdb/influxdb/client"
-	"github.com/naoina/toml"
 	"io/ioutil"
 	"log"
 	"math/rand"
@@ -23,6 +16,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	hublleAgent "github.com/Jumpscale/hubble/agent"
+	hubbleAuth "github.com/Jumpscale/hubble/auth"
+	hublleProxy "github.com/Jumpscale/hubble/proxy"
+	"github.com/garyburd/redigo/redis"
+	"github.com/gin-gonic/gin"
+	influxdb "github.com/influxdb/influxdb/client"
 )
 
 const (
@@ -37,43 +37,6 @@ const (
 )
 
 var TAGS = []string{"gid", "nid", "command", "domain", "name", "measurement"}
-
-type Settings struct {
-	Main struct {
-		Listen        string
-		RedisHost     string
-		RedisPassword string
-	}
-
-	Influxdb struct {
-		Host     string
-		Db       string
-		User     string
-		Password string
-	}
-
-	Handlers struct {
-		Binary string
-		Cwd    string
-		Env    map[string]string
-	}
-}
-
-//LoadTomlFile loads toml using "github.com/naoina/toml"
-func LoadTomlFile(filename string, v interface{}) {
-	f, err := os.Open(filename)
-	if err != nil {
-		panic(err)
-	}
-	defer f.Close()
-	buf, err := ioutil.ReadAll(f)
-	if err != nil {
-		panic(err)
-	}
-	if err := toml.Unmarshal(buf, v); err != nil {
-		panic(err)
-	}
-}
 
 // data types
 type CommandMessage struct {
@@ -791,7 +754,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	LoadTomlFile(cfg, &settings)
+	settings, err := LoadSettingsFromTomlFile(cfg)
+	if err != nil {
+		log.Panicln("Error loading concfiguration file:", err)
+	}
+	if !settings.TLSEnabled() {
+		log.Println("[WARNING] TLS not enabled, don't do this on production environments")
+	}
 
 	log.Printf("[+] webservice: <%s>\n", settings.Main.Listen)
 	log.Printf("[+] redis server: <%s>\n", settings.Main.RedisHost)
