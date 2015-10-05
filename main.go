@@ -775,7 +775,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	settings, err := LoadSettingsFromTomlFile(cfg)
+	var err error
+	settings, err = LoadSettingsFromTomlFile(cfg)
 	if err != nil {
 		log.Panicln("Error loading concfiguration file:", err)
 	}
