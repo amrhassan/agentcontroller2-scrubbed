@@ -14,6 +14,9 @@ type HTTPBinding struct {
 		Cert string
 		Key  string
 	}
+	ClientCA []struct {
+		Cert string
+	}
 }
 
 //Settings are the configurable options for the AgentController
@@ -55,7 +58,12 @@ func LoadSettingsFromTomlFile(filename string) (settings Settings, err error) {
 
 }
 
-//TLSEnabled returns true if a Cert and Key are configured in the binding settings
+//TLSEnabled returns true if TLS settings are present
 func (httpBinding HTTPBinding) TLSEnabled() bool {
 	return len(httpBinding.TLS) > 0
+}
+
+//ClientCertificateRequired returns true if ClientCA's are present
+func (httpBinding HTTPBinding) ClientCertificateRequired() bool {
+	return len(httpBinding.ClientCA) > 0
 }

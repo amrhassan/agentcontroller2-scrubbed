@@ -6,7 +6,7 @@ redis_password = ""
 [[listen]]
   Address = ":8966"
 
-#Example for https with multiple virtual hosts
+#Example for https with multiple virtual hosts and clientcertificates
 #[[listen]]
 #  Address = ":8443"
 #  [[listen.tls]]
@@ -15,6 +15,10 @@ redis_password = ""
 #  [[listen.tls]]
 #    cert = "/path/to/domain2_certificate.cert"
 #    key = "/path/to/domain2_keyfile.key"
+#  [[listen.clientCA]]
+#    cert = "/path/to/CAcert1.cert"
+#  [[listen.clientCA]]
+#    cert = "/path/to/CAcert2.cert"
 
 [influxdb]
 host = "127.0.0.1:8086"

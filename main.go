@@ -841,14 +841,15 @@ func main() {
 			server := &http.Server{Addr: httpBinding.Address, Handler: router}
 			if httpBinding.TLSEnabled() {
 				server.TLSConfig = &tls.Config{}
-				server.TLSConfig.Certificates = make([]tls.Certificate, len(httpBinding.TLS), len(httpBinding.TLS))
-				for certificateIndex, tlsSetting := range httpBinding.TLS {
-					certificate, err := tls.LoadX509KeyPair(tlsSetting.Cert, tlsSetting.Key)
-					if err != nil {
-						log.Panicln("Unable to load certificate", err)
-					}
-					server.TLSConfig.Certificates[certificateIndex] = certificate
+
+				if err := configureServerCertificates(httpBinding, server); err != nil {
+					log.Panicln("Unable to load the server certificates", err)
 				}
+
+				if err := configureClientCertificates(httpBinding, server); err != nil {
+					log.Panicln("Unable to load the clientCA's", err)
+				}
+
 				ln, err := net.Listen("tcp", server.Addr)
 				if err != nil {
 					log.Panicln(err)
