@@ -331,7 +331,7 @@ func cmdreader() {
 	}
 }
 
-//Checks if x is in l
+//In checks if x is in l
 func In(l []string, x string) bool {
 	for i := 0; i < len(l); i++ {
 		if l[i] == x {
@@ -342,8 +342,8 @@ func In(l []string, x string) bool {
 	return false
 }
 
-var producers map[string]chan *PollData = make(map[string]chan *PollData)
-var producersRoles map[string][]string = make(map[string][]string)
+var producers = make(map[string]chan *PollData)
+var producersRoles = make(map[string][]string)
 
 // var activeRoles map[string]int = make(map[string]int)
 // var activeGridRoles map[string]map[string]int = make(map[string]map[string]int)
@@ -426,7 +426,7 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 							break
 						}
 
-						result_placehoder := CommandResult{
+						resultPlacehoder := CommandResult{
 							Id:        payload.Id,
 							Gid:       igid,
 							Nid:       inid,
@@ -434,7 +434,7 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 							StartTime: int64(time.Duration(time.Now().UnixNano()) / time.Millisecond),
 						}
 
-						if data, err := json.Marshal(&result_placehoder); err == nil {
+						if data, err := json.Marshal(&resultPlacehoder); err == nil {
 							db.Do("HSET",
 								fmt.Sprintf(JOBRESULT_HASH, payload.Id),
 								key,
@@ -627,7 +627,7 @@ func stats(c *gin.Context) {
 			case float64:
 				value = v
 			default:
-				log.Println("Invalid influxdb value %v", v)
+				log.Println("Invalid influxdb value:", v)
 			}
 
 			key := stats.Series[i][0].(string)
@@ -751,25 +751,33 @@ func handlHubbleProxy(context *gin.Context) {
 	hublleProxy.ProxyHandler(context.Writer, context.Request)
 }
 
+//StartSyncthingHubbleAgent start the builtin hubble agent required for Syncthing
+func StartSyncthingHubbleAgent(hubblePort int) {
+
+	wsURL := fmt.Sprintf("ws://127.0.0.1:%d/0/0/hubble", hubblePort)
+	log.Println("Starting local hubble agent at", wsURL)
+	agent := hublleAgent.NewAgent(wsURL, "controller", "", nil)
+	var onExit func(agt hublleAgent.Agent, err error)
+
+	onExit = func(agt hublleAgent.Agent, err error) {
+		if err != nil {
+			go func() {
+				time.Sleep(3 * time.Second)
+				agt.Start(onExit)
+			}()
+		}
+	}
+
+	agent.Start(onExit)
+}
+
 var settings Settings
 
 func main() {
 	var cfg string
-	var help bool
 
-	flag.BoolVar(&help, "h", false, "Print this help screen")
 	flag.StringVar(&cfg, "c", "", "Path to config file")
 	flag.Parse()
-
-	printHelp := func() {
-		log.Println("agentcontroller [options]")
-		flag.PrintDefaults()
-	}
-
-	if help {
-		printHelp()
-		return
-	}
 
 	if cfg == "" {
 		log.Println("Missing required option -c")
@@ -780,7 +788,7 @@ func main() {
 	var err error
 	settings, err = LoadSettingsFromTomlFile(cfg)
 	if err != nil {
-		log.Panicln("Error loading concfiguration file:", err)
+		log.Panicln("Error loading configuration file:", err)
 	}
 
 	log.Printf("[+] redis server: <%s>\n", settings.Main.RedisHost)
@@ -844,22 +852,7 @@ func main() {
 		}(httpBinding)
 	}
 
-	//start the builtin hubble agent so agents can open tunnels to master(controller) nodes.
-	wsURL := fmt.Sprintf("ws://127.0.0.1:%d/0/0/hubble", settings.Syncthing.Port)
-	log.Println("Starting local hubble agent at", wsURL)
-	agent := hublleAgent.NewAgent(wsURL, "controller", "", nil)
-	var onExit func(agt hublleAgent.Agent, err error)
-
-	onExit = func(agt hublleAgent.Agent, err error) {
-		if err != nil {
-			go func() {
-				time.Sleep(3 * time.Second)
-				agt.Start(onExit)
-			}()
-		}
-	}
-
-	agent.Start(onExit)
+	StartSyncthingHubbleAgent(settings.Syncthing.Port)
 
 	wg.Wait()
 }
