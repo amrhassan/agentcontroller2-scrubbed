@@ -40,6 +40,10 @@ type Settings struct {
 		Cwd    string
 		Env    map[string]string
 	}
+
+	Syncthing struct {
+		Port int
+	}
 }
 
 //LoadSettingsFromTomlFile does exactly what the name says, it loads a toml in a Settings struct

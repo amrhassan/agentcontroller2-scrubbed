@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	hublleAgent "github.com/Jumpscale/hubble/agent"
 	hubbleAuth "github.com/Jumpscale/hubble/auth"
 	hublleProxy "github.com/Jumpscale/hubble/proxy"
 	"github.com/garyburd/redigo/redis"
@@ -806,34 +807,6 @@ func main() {
 	router.GET("/:gid/:nid/hubble", handlHubbleProxy)
 	// router.Static("/doc", "./doc")
 
-	//start the builtin hubble agent so agents can open tunnels to master(controller) nodes.
-	//TODO: integrate with the the new http binding
-	// ipport := strings.Split(settings.Main.Listen, ":")
-	// if len(ipport) != 2 {
-	// 	log.Fatalf("Invalid listen address %s\n", settings.Main.Listen)
-	// }
-	//
-	// hubbleIp := "127.0.0.1"
-	// if ipport[0] != "" {
-	// 	hubbleIp = ipport[0]
-	// }
-	//
-	// wsURL := fmt.Sprintf("ws://%s:%s/0/0/hubble", hubbleIp, ipport[1])
-	// log.Println("Starting local hubble agent at", wsURL)
-	// agent := hublleAgent.NewAgent(wsURL, "controller", "", nil)
-	// var onExit func(agt hublleAgent.Agent, err error)
-	//
-	// onExit = func(agt hublleAgent.Agent, err error) {
-	// 	if err != nil {
-	// 		go func() {
-	// 			time.Sleep(3 * time.Second)
-	// 			agt.Start(onExit)
-	// 		}()
-	// 	}
-	// }
-	//
-	//agent.Start(onExit)
-
 	var wg sync.WaitGroup
 	wg.Add(len(settings.Listen))
 	for _, httpBinding := range settings.Listen {
@@ -870,5 +843,23 @@ func main() {
 			}
 		}(httpBinding)
 	}
+
+	//start the builtin hubble agent so agents can open tunnels to master(controller) nodes.
+	wsURL := fmt.Sprintf("ws://127.0.0.1:%d/0/0/hubble", settings.Syncthing.Port)
+	log.Println("Starting local hubble agent at", wsURL)
+	agent := hublleAgent.NewAgent(wsURL, "controller", "", nil)
+	var onExit func(agt hublleAgent.Agent, err error)
+
+	onExit = func(agt hublleAgent.Agent, err error) {
+		if err != nil {
+			go func() {
+				time.Sleep(3 * time.Second)
+				agt.Start(onExit)
+			}()
+		}
+	}
+
+	agent.Start(onExit)
+
 	wg.Wait()
 }

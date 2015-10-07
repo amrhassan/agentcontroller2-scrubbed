@@ -37,3 +37,13 @@ cwd = "./handlers"
     REDIS_ADDRESS = "localhost"
     REDIS_PORT = "6379"
     #REDIS_PASSWORD = ""
+
+##### The following 2 sections are supportive for syncthing operation
+##### Please don't remove or edit unless you know what you are doing
+##### This will get replace once we implement local transport for hubbble.
+[syncthing]
+port=9066
+
+[[listen]]
+address="127.0.0.1:9066"
+##### END SECTION.
