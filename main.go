@@ -749,6 +749,36 @@ func event(c *gin.Context) {
 	c.JSON(http.StatusOK, "ok")
 }
 
+/*
+Gets hashed scripts from redis.
+*/
+func script(c *gin.Context) {
+
+	query := c.Request.URL.Query()
+	hashes, ok := query["hash"]
+	if !ok {
+		// that's an error. Hash is required.
+		c.String(http.StatusBadRequest, "Missing 'hash' param")
+		return
+	}
+
+	hash := hashes[0]
+
+	db := pool.Get()
+	defer db.Close()
+
+	payload, err := redis.String(db.Do("GET", hash))
+	if err != nil {
+		log.Println("Script get error:", err)
+		c.String(http.StatusNotFound, "Script with hash '%s' not found", hash)
+		return
+	}
+
+	log.Println(payload)
+
+	c.String(http.StatusOK, payload)
+}
+
 func handlHubbleProxy(context *gin.Context) {
 	hublleProxy.ProxyHandler(context.Writer, context.Request)
 }
@@ -815,6 +845,7 @@ func main() {
 	router.POST("/:gid/:nid/stats", stats)
 	router.POST("/:gid/:nid/event", event)
 	router.GET("/:gid/:nid/hubble", handlHubbleProxy)
+	router.GET("/:gid/:nid/script", script)
 	// router.Static("/doc", "./doc")
 
 	var wg sync.WaitGroup
