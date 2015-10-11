@@ -208,7 +208,7 @@ func readSingleCmd() bool {
 	db := pool.Get()
 	defer db.Close()
 
-	command, err := redis.Strings(db.Do("BLPOP", COMMANDS_QUEUE, "0"))
+	commandEntry, err := redis.Strings(db.Do("BLPOP", COMMANDS_QUEUE, "0"))
 
 	if err != nil {
 		if isTimeout(err) {
@@ -217,12 +217,13 @@ func readSingleCmd() bool {
 
 		log.Fatal("Coulnd't read new commands from redis", err)
 	}
+	command := commandEntry[1]
 
-	log.Println("Received message:", command[1])
-
+	log.Println("Received message:", command)
+	command = InterceptCommand(command)
 	// parsing json data
 	var payload CommandMessage
-	err = json.Unmarshal([]byte(command[1]), &payload)
+	err = json.Unmarshal([]byte(command), &payload)
 
 	if err != nil {
 		log.Println("message decoding error:", err)
@@ -233,6 +234,7 @@ func readSingleCmd() bool {
 		go processInternalCommand(payload)
 		return true
 	}
+
 	//sort command to the consumer queue.
 	//either by role or by the gid/nid.
 	ids := list.New()
@@ -285,7 +287,7 @@ func readSingleCmd() bool {
 	}
 
 	// push logs
-	if _, err := db.Do("LPUSH", LOG_QUEUE, command[1]); err != nil {
+	if _, err := db.Do("LPUSH", LOG_QUEUE, command); err != nil {
 		log.Println("[-] log push error: ", err)
 	}
 
@@ -297,7 +299,7 @@ func readSingleCmd() bool {
 		nid := agent[1]
 
 		log.Println("Dispatching message to", agent)
-		if _, err := db.Do("RPUSH", getAgentQueue(gid, nid), command[1]); err != nil {
+		if _, err := db.Do("RPUSH", getAgentQueue(gid, nid), command); err != nil {
 			log.Println("[-] push error: ", err)
 		}
 
