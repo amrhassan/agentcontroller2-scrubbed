@@ -9,18 +9,19 @@ import (
 )
 
 const (
-	ScriptHashTimeout = 86400 // seconds
+	scriptHashTimeout = 86400 // seconds
 )
 
+//Interceptor is a callback type
 type Interceptor func(map[string]interface{}) (map[string]interface{}, error)
 
 var interceptors = map[string]Interceptor{
 	"jumpscript_content": JumpscriptHasherInterceptor,
 }
 
-/**
-Hashes jumpscripts executed by the jumpscript_content and store it in memory.
-**/
+/*
+JumpscriptHasherInterceptor hashes jumpscripts executed by the jumpscript_content and store it in redis. Alters the passed command as needed
+*/
 func JumpscriptHasherInterceptor(cmd map[string]interface{}) (map[string]interface{}, error) {
 	datastr, ok := cmd["data"].(string)
 	if !ok {
@@ -48,7 +49,7 @@ func JumpscriptHasherInterceptor(cmd map[string]interface{}) (map[string]interfa
 	db := pool.Get()
 	defer db.Close()
 
-	if _, err := db.Do("SET", hash, contentstr, "EX", ScriptHashTimeout); err != nil {
+	if _, err := db.Do("SET", hash, contentstr, "EX", scriptHashTimeout); err != nil {
 		return nil, err
 	}
 
@@ -56,17 +57,18 @@ func JumpscriptHasherInterceptor(cmd map[string]interface{}) (map[string]interfa
 	delete(data, "content")
 	data["hash"] = hash
 
-	if datastr, err := json.Marshal(data); err != nil {
+	updatedDatastr, err := json.Marshal(data)
+	if err != nil {
 		return nil, err
-	} else {
-		cmd["data"] = string(datastr)
 	}
+
+	cmd["data"] = string(updatedDatastr)
 
 	return cmd, nil
 }
 
 /*
-Intercepts raw command data and manipulate it if needed.
+InterceptCommand intercepts raw command data and manipulate it if needed.
 */
 func InterceptCommand(command string) string {
 	cmd := make(map[string]interface{})

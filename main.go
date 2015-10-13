@@ -28,21 +28,21 @@ import (
 )
 
 const (
-	AGENT_INACTIVER_AFTER_OVER = 30 * time.Second
-	ROLE_ALL                   = "*"
-	COMMANDS_QUEUE             = "cmds.queue"
-	JOBS_QUEUED_QUEUE          = "cmd.%s.queued"
-	AGENT_RESULT_QUEUE         = "cmd.%s.%d.%d"
-	LOG_QUEUE                  = "joblog"
-	JOBRESULT_HASH             = "jobresult:%s"
-	INTERNAL_COMMAND           = "controller"
+	agentInteractiveAfterOver = 30 * time.Second
+	roleAll                   = "*"
+	cmdQueueMain              = "cmds.queue"
+	cmdQueueCmdQueued         = "cmd.%s.queued"
+	cmdQueueAgentResponse     = "cmd.%s.%d.%d"
+	logQueue                  = "joblog"
+	hashCmdResults            = "jobresult:%s"
+	cmdInternal               = "controller"
 )
 
-var TAGS = []string{"gid", "nid", "command", "domain", "name", "measurement"}
+var influxDbTags = []string{"gid", "nid", "command", "domain", "name", "measurement"}
 
-// data types
+//CommandMessage command message
 type CommandMessage struct {
-	Id     string   `json:"id"`
+	ID     string   `json:"id"`
 	Gid    int      `json:"gid"`
 	Nid    int      `json:"nid"`
 	Cmd    string   `json:"cmd"`
@@ -53,8 +53,9 @@ type CommandMessage struct {
 	} `json:"args"`
 }
 
+//CommandResult command result
 type CommandResult struct {
-	Id        string `json:"id"`
+	ID        string `json:"id"`
 	Nid       int    `json:"nid"`
 	Gid       int    `json:"gid"`
 	State     string `json:"state"`
@@ -63,11 +64,13 @@ type CommandResult struct {
 	StartTime int64  `json:"starttime"`
 }
 
+//StatsRequest stats request
 type StatsRequest struct {
 	Timestamp int64           `json:"timestamp"`
 	Series    [][]interface{} `json:"series"`
 }
 
+//EvenRequest event request
 type EvenRequest struct {
 	Name string `json:"name"`
 	Data string `json:"data"`
@@ -79,7 +82,7 @@ func newPool(addr string, password string) *redis.Pool {
 		MaxIdle:   80,
 		MaxActive: 12000,
 		Dial: func() (redis.Conn, error) {
-			c, err := redis.DialTimeout("tcp", addr, 0, AGENT_INACTIVER_AFTER_OVER/2, 0)
+			c, err := redis.DialTimeout("tcp", addr, 0, agentInteractiveAfterOver/2, 0)
 
 			if err != nil {
 				panic(err.Error())
@@ -108,16 +111,16 @@ func getAgentQueue(gid int, nid int) string {
 }
 
 func getAgentResultQueue(result *CommandResult) string {
-	return fmt.Sprintf(AGENT_RESULT_QUEUE, result.Id, result.Gid, result.Nid)
+	return fmt.Sprintf(cmdQueueAgentResponse, result.ID, result.Gid, result.Nid)
 }
 
 func getActiveAgents(onlyGid int, roles []string) [][]int {
 	producersLock.Lock()
 	defer producersLock.Unlock()
 
-	checkRole := len(roles) > 0 && roles[0] != ROLE_ALL
+	checkRole := len(roles) > 0 && roles[0] != roleAll
 	agents := make([][]int, 0, 10)
-	for key, _ := range producers {
+	for key := range producers {
 		var gid, nid int
 		fmt.Sscanf(key, "%d:%d", &gid, &nid)
 		if onlyGid > 0 && onlyGid != gid {
@@ -150,7 +153,7 @@ func sendResult(result *CommandResult) {
 	key := fmt.Sprintf("%d:%d", result.Gid, result.Nid)
 	if data, err := json.Marshal(&result); err == nil {
 		db.Do("HSET",
-			fmt.Sprintf(JOBRESULT_HASH, result.Id),
+			fmt.Sprintf(hashCmdResults, result.ID),
 			key,
 			data)
 
@@ -159,17 +162,17 @@ func sendResult(result *CommandResult) {
 	}
 }
 
-func internal_list_agents(cmd *CommandMessage) (interface{}, error) {
+func internalListAgents(cmd *CommandMessage) (interface{}, error) {
 	return producersRoles, nil
 }
 
 var internals = map[string]func(*CommandMessage) (interface{}, error){
-	"list_agents": internal_list_agents,
+	"list_agents": internalListAgents,
 }
 
 func processInternalCommand(command CommandMessage) {
 	result := &CommandResult{
-		Id:        command.Id,
+		ID:        command.ID,
 		Gid:       command.Gid,
 		Nid:       command.Nid,
 		State:     "ERROR",
@@ -195,20 +198,20 @@ func processInternalCommand(command CommandMessage) {
 	}
 
 	sendResult(result)
-	signalQueues(command.Id)
+	signalQueues(command.ID)
 }
 
 func signalQueues(id string) {
 	db := pool.Get()
 	defer db.Close()
-	db.Do("RPUSH", fmt.Sprintf(JOBS_QUEUED_QUEUE, id), "queued")
+	db.Do("RPUSH", fmt.Sprintf(cmdQueueCmdQueued, id), "queued")
 }
 
 func readSingleCmd() bool {
 	db := pool.Get()
 	defer db.Close()
 
-	commandEntry, err := redis.Strings(db.Do("BLPOP", COMMANDS_QUEUE, "0"))
+	commandEntry, err := redis.Strings(db.Do("BLPOP", cmdQueueMain, "0"))
 
 	if err != nil {
 		if isTimeout(err) {
@@ -230,7 +233,7 @@ func readSingleCmd() bool {
 		return true
 	}
 
-	if payload.Cmd == INTERNAL_COMMAND {
+	if payload.Cmd == cmdInternal {
 		go processInternalCommand(payload)
 		return true
 	}
@@ -245,7 +248,7 @@ func readSingleCmd() bool {
 		if len(active) == 0 {
 			//no active agents that saticifies this role.
 			result := &CommandResult{
-				Id:        payload.Id,
+				ID:        payload.ID,
 				Gid:       payload.Gid,
 				Nid:       payload.Nid,
 				State:     "ERROR",
@@ -272,7 +275,7 @@ func readSingleCmd() bool {
 		if !ok {
 			//send error message to
 			result := &CommandResult{
-				Id:        payload.Id,
+				ID:        payload.ID,
 				Gid:       payload.Gid,
 				Nid:       payload.Nid,
 				State:     "ERROR",
@@ -287,7 +290,7 @@ func readSingleCmd() bool {
 	}
 
 	// push logs
-	if _, err := db.Do("LPUSH", LOG_QUEUE, command); err != nil {
+	if _, err := db.Do("LPUSH", logQueue, command); err != nil {
 		log.Println("[-] log push error: ", err)
 	}
 
@@ -303,23 +306,23 @@ func readSingleCmd() bool {
 			log.Println("[-] push error: ", err)
 		}
 
-		result_placehoder := CommandResult{
-			Id:        payload.Id,
+		resultPlaceholder := CommandResult{
+			ID:        payload.ID,
 			Gid:       gid,
 			Nid:       nid,
 			State:     "QUEUED",
 			StartTime: int64(time.Duration(time.Now().UnixNano()) / time.Millisecond),
 		}
 
-		if data, err := json.Marshal(&result_placehoder); err == nil {
+		if data, err := json.Marshal(&resultPlaceholder); err == nil {
 			db.Do("HSET",
-				fmt.Sprintf(JOBRESULT_HASH, payload.Id),
+				fmt.Sprintf(hashCmdResults, payload.ID),
 				fmt.Sprintf("%d:%d", gid, nid),
 				data)
 		}
 	}
 
-	signalQueues(payload.Id)
+	signalQueues(payload.ID)
 	return true
 }
 
@@ -351,8 +354,8 @@ var producersRoles = make(map[string][]string)
 // var activeGridRoles map[string]map[string]int = make(map[string]map[string]int)
 var producersLock sync.Mutex
 
-/**
-Gets a chain for the caller to wait on, we return a chan chan string instead
+/*
+PollData Gets a chain for the caller to wait on, we return a chan chan string instead
 of chan string directly to make sure of the following:
 1- The redis pop loop will not try to pop jobs out of the queue until there is a caller waiting
    for new commands
@@ -396,9 +399,9 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 
 					select {
 					case data = <-producer:
-					case <-time.After(AGENT_INACTIVER_AFTER_OVER):
+					case <-time.After(agentInteractiveAfterOver):
 						//no active agent for 10 min
-						log.Println("Agent", key, "is inactive for over ", AGENT_INACTIVER_AFTER_OVER, ", cleaning up.")
+						log.Println("Agent", key, "is inactive for over ", agentInteractiveAfterOver, ", cleaning up.")
 						return false
 					}
 
@@ -429,7 +432,7 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 						}
 
 						resultPlacehoder := CommandResult{
-							Id:        payload.Id,
+							ID:        payload.ID,
 							Gid:       igid,
 							Nid:       inid,
 							State:     "RUNNING",
@@ -438,7 +441,7 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 
 						if data, err := json.Marshal(&resultPlacehoder); err == nil {
 							db.Do("HSET",
-								fmt.Sprintf(JOBRESULT_HASH, payload.Id),
+								fmt.Sprintf(hashCmdResults, payload.ID),
 								key,
 								data)
 						}
@@ -560,11 +563,11 @@ func result(c *gin.Context) {
 		return
 	}
 
-	log.Println("Jobresult:", payload.Id)
+	log.Println("Jobresult:", payload.ID)
 
 	// update jobresult
 	db.Do("HSET",
-		fmt.Sprintf(JOBRESULT_HASH, payload.Id),
+		fmt.Sprintf(hashCmdResults, payload.ID),
 		key,
 		content)
 
@@ -638,7 +641,7 @@ func stats(c *gin.Context) {
 			tags := make(map[string]string)
 			tagsValues := strings.SplitN(key, ".", 6)
 			for i, tagValue := range tagsValues {
-				tags[TAGS[i]] = tagValue
+				tags[influxDbTags[i]] = tagValue
 			}
 
 			point := influxdb.Point{
