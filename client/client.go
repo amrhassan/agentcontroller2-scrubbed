@@ -1,10 +1,10 @@
 package client
 
 import (
-	"code.google.com/p/go-uuid/uuid"
 	"encoding/json"
 	"fmt"
 	"github.com/garyburd/redigo/redis"
+	"github.com/pborman/uuid"
 )
 
 //Timeout error type
