@@ -1,6 +1,7 @@
 import json
 import requests
 import logging
+import hashlib
 
 import utils
 from JumpScale import j
@@ -82,6 +83,7 @@ def startup(gid, nid):
         raise Exception('Invalid response from syncthing', response.reason)
 
     local_device_id = response.headers['x-syncthing-id']
+    device_id_hash = hashlib.md5(local_device_id).hexdigest()
     config = response.json()
 
     if api_key is None:
@@ -107,7 +109,8 @@ def startup(gid, nid):
         dirty = True
 
     # add device to shared folder.
-    for folder_id in SHARE_FOLDERS:
+    for folder_id_prefix in SHARE_FOLDERS:
+        folder_id = '%s-%s' % (folder_id_prefix, device_id_hash)
         folders = filter(lambda f: f['id'] == folder_id, config['folders'])
 
         if not folders:
@@ -136,9 +139,10 @@ def startup(gid, nid):
     # Now, the syncthing on AC side knows about the syncthing on Agent side. Now we have
     # to register this instance of syncthing on agent as well. We can do this via a simple agent command
 
-    for folder_id, remote_path in SHARE_FOLDERS.iteritems():
+    for folder_id_prefix, remote_path in SHARE_FOLDERS.iteritems():
         # NOTE: the address is set to 127.0.0.1:33000 because the agent automatically opens a tunnel
         # to the master node (this machine)
+        folder_id = '%s-%s' % (folder_id_prefix, device_id_hash)
         data = {
             'device_id': local_device_id,
             'folder_id': folder_id,
