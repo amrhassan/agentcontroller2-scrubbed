@@ -41,6 +41,17 @@ def get_url(endpoint):
     return '%s%s' % (base_url, endpoint)
 
 
+def openPortForward(client, gid, nid):
+    tunnels = client.tunnel_list(gid, nid)
+    synctunnel = filter(lambda t: t['remote'] == 22000 and t['gateway'] == 'controller', tunnels)
+    if synctunnel:
+        tunnel = synctunnel[0]
+    else:
+        tunnel = client.tunnel_open(gid, nid, 0, 'controller', '127.0.0.1', 22000)
+
+    return '127.0.0.1:%d' % tunnel['local']
+
+
 @utils.exclusive('/tmp/agent-start.lock')
 def startup(gid, nid):
     # TODO: client must use settings of somekind
@@ -61,6 +72,7 @@ def startup(gid, nid):
 
     get_id = client.cmd(gid, nid, 'sync', default.update({'name': 'get_id'}))
 
+    address = openPortForward(client, gid, nid)
     agent_device_id = results_or_die(get_id.get_next_result(30))
 
     endpoint = get_url(ENDPOINT_CONFIG)
@@ -131,7 +143,7 @@ def startup(gid, nid):
             'device_id': local_device_id,
             'folder_id': folder_id,
             'path': remote_path,
-            'address': '127.0.0.1:33000',
+            'address': address,
         }
 
         result = client.cmd(gid, nid,
