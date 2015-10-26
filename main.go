@@ -48,10 +48,22 @@ type CommandMessage struct {
 	Cmd    string   `json:"cmd"`
 	Roles  []string `json:"roles"`
 	Fanout bool     `json:"fanout"`
+	Data   string   `json:"data"`
 	Args   struct {
 		Name string `json:"name"`
 	} `json:"args"`
 }
+
+// type Command struct {
+// 	ID     string   `json:"id"`
+// 	Gid    int      `json:"gid"`
+// 	Nid    int      `json:"nid"`
+// 	Cmd    string   `json:"cmd"`
+// 	Args   RunArgs  `json:"args"`
+// 	Data   string   `json:"data"`
+// 	Roles  []string `json:"roles"`
+// 	Fanout bool     `json:"fanout"`
+// }
 
 //CommandResult command result
 type CommandResult struct {
@@ -840,6 +852,14 @@ func main() {
 	router := gin.Default()
 
 	go cmdreader()
+
+	//start schedular.
+	scheduler := NewScheduler(pool)
+	internals["scheduler_add"] = scheduler.Add
+	internals["scheduler_list"] = scheduler.List
+	internals["scheduler_remove"] = scheduler.Remove
+
+	scheduler.Start()
 
 	hubbleAuth.Install(hubbleAuth.NewAcceptAllModule())
 	router.GET("/:gid/:nid/cmd", cmd)
