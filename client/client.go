@@ -48,15 +48,16 @@ var TIMEOUT Timeout
 
 //Job represents a job
 type Job struct {
-	ID        string `json:"id"`
-	Gid       int    `json:"gid"`
-	Nid       int    `json:"nid"`
-	Cmd       string `json:"cmd"`
-	Data      string `json:"data"`
-	Level     int    `json:"level"`
-	Starttime int    `json:"starttime"`
-	State     string `json:"state"`
-	Time      int    `json:"time"`
+	ID        string   `json:"id"`
+	Gid       int      `json:"gid"`
+	Nid       int      `json:"nid"`
+	Cmd       string   `json:"cmd"`
+	Data      string   `json:"data"`
+	Streams   []string `json:"streams`
+	Level     int      `json:"level"`
+	Starttime int      `json:"starttime"`
+	State     string   `json:"state"`
+	Time      int      `json:"time"`
 
 	redis *redis.Pool
 }
