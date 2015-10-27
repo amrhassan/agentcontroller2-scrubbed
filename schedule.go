@@ -48,13 +48,10 @@ func NewScheduler(pool *redis.Pool) *Scheduler {
 
 //create a schdule with the cmd ID (overrides old ones) and
 func (sched *Scheduler) Add(cmd *CommandMessage) (interface{}, error) {
-	sched.cron.Stop()
-	defer sched.cron.Start()
+	defer sched.restart()
 
 	db := sched.pool.Get()
 	defer db.Close()
-
-	exists, _ := redis.Int(db.Do("HEXISTS", hashScheduleKey, cmd.ID))
 
 	job := &SchedulerJob{}
 
@@ -74,18 +71,7 @@ func (sched *Scheduler) Add(cmd *CommandMessage) (interface{}, error) {
 	//we can safely push the command to the hashset now.
 	db.Do("HSET", hashScheduleKey, cmd.ID, cmd.Data)
 
-	if exists == 1 {
-		//if the job exists, we need to remove the old job and readd the new one
-		//there is no way we can do this on the fly so we have to stop the entire
-		//schduler and restart it.
-
-		//TODO:
-	} else {
-		//hock the task on the fly
-		sched.cron.AddJob(job.Cron, job)
-	}
-
-	return nil, nil
+	return true, nil
 }
 
 func (sched *Scheduler) List(cmd *CommandMessage) (interface{}, error) {
