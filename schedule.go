@@ -31,6 +31,8 @@ func (job *SchedulerJob) Run() {
 
 	dump, _ := json.Marshal(job.Cmd)
 
+	log.Println("Scheduler: Running job", job.ID, job.Cmd["id"])
+
 	_, err := db.Do("RPUSH", cmdQueueMain, string(dump))
 	if err != nil {
 		log.Println("Failed to run scheduled command", job.ID)
