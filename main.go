@@ -27,8 +27,8 @@ import (
 	influxdb "github.com/influxdb/influxdb/client"
 
 	"github.com/Jumpscale/agentcontroller2/commands"
-	"github.com/Jumpscale/agentcontroller2/redismb"
 	"github.com/Jumpscale/agentcontroller2/messaging"
+	"github.com/Jumpscale/agentcontroller2/messaging/redismb"
 )
 
 const (
