@@ -15,7 +15,10 @@ type redisMessagingBus struct {
 }
 
 const (
-	cmdQueueMain = "cmds.queue"
+	cmdQueueMain              = "cmds.queue"
+	cmdQueueCmdQueued         = "cmd.%s.queued"
+	cmdQueueAgentResponse     = "cmd.%s.%d.%d"
+	hashCmdResults            = "jobresult:%s"
 )
 
 func (messagingBus redisMessagingBus) ReceiveCommand() (*commands.Command, error) {
@@ -88,7 +91,7 @@ func (messagingBus redisMessagingBus) RespondToCommandAsJustQueued(agentID messa
 	}
 
 	_, err =
-		db.Do("HSET", fmt.Sprintf("jobresult:%s", command.ID), fmt.Sprintf("%d:%d", agentID.GID, agentID.NID), data)
+		db.Do("HSET", fmt.Sprintf(hashCmdResults, command.ID), fmt.Sprintf("%d:%d", agentID.GID, agentID.NID), data)
 
 	if err != nil {
 		return redisMBError{underlying: err, errorType: channelErrorType}
@@ -98,7 +101,7 @@ func (messagingBus redisMessagingBus) RespondToCommandAsJustQueued(agentID messa
 }
 
 func getAgentResultQueue(result *commands.Result) string {
-	return fmt.Sprintf("cmd.%s.%d.%d", result.ID, result.Gid, result.Nid)
+	return fmt.Sprintf(cmdQueueAgentResponse, result.ID, result.Gid, result.Nid)
 }
 
 func (messagingBus redisMessagingBus) SetCommandResult(result *commands.Result) error {
@@ -112,7 +115,7 @@ func (messagingBus redisMessagingBus) SetCommandResult(result *commands.Result) 
 	}
 
 	key := fmt.Sprintf("%d:%d", result.Gid, result.Nid)
-	_, err = db.Do("HSET", fmt.Sprintf("jobresult:%s", result.ID), key, resultJson)
+	_, err = db.Do("HSET", fmt.Sprintf(hashCmdResults, result.ID), key, resultJson)
 	if err != nil {
 		return redisMBError{underlying: err, errorType: channelErrorType}
 	}
