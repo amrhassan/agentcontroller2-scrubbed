@@ -25,6 +25,8 @@ import (
 	"github.com/garyburd/redigo/redis"
 	"github.com/gin-gonic/gin"
 	influxdb "github.com/influxdb/influxdb/client"
+
+	"github.com/Jumpscale/agentcontroller2/commands"
 )
 
 const (
@@ -40,41 +42,6 @@ const (
 
 var influxDbTags = []string{"gid", "nid", "command", "domain", "name", "measurement"}
 
-//CommandMessage command message
-type CommandMessage struct {
-	ID     string   `json:"id"`
-	Gid    int      `json:"gid"`
-	Nid    int      `json:"nid"`
-	Cmd    string   `json:"cmd"`
-	Roles  []string `json:"roles"`
-	Fanout bool     `json:"fanout"`
-	Data   string   `json:"data"`
-	Args   struct {
-		Name string `json:"name"`
-	} `json:"args"`
-}
-
-// type Command struct {
-// 	ID     string   `json:"id"`
-// 	Gid    int      `json:"gid"`
-// 	Nid    int      `json:"nid"`
-// 	Cmd    string   `json:"cmd"`
-// 	Args   RunArgs  `json:"args"`
-// 	Data   string   `json:"data"`
-// 	Roles  []string `json:"roles"`
-// 	Fanout bool     `json:"fanout"`
-// }
-
-//CommandResult command result
-type CommandResult struct {
-	ID        string `json:"id"`
-	Nid       int    `json:"nid"`
-	Gid       int    `json:"gid"`
-	State     string `json:"state"`
-	Data      string `json:"data"`
-	Level     int    `json:"level"`
-	StartTime int64  `json:"starttime"`
-}
 
 //StatsRequest stats request
 type StatsRequest struct {
@@ -122,7 +89,7 @@ func getAgentQueue(gid int, nid int) string {
 	return fmt.Sprintf("cmds:%d:%d", gid, nid)
 }
 
-func getAgentResultQueue(result *CommandResult) string {
+func getAgentResultQueue(result *commands.Result) string {
 	return fmt.Sprintf(cmdQueueAgentResponse, result.ID, result.Gid, result.Nid)
 }
 
@@ -158,7 +125,7 @@ func getActiveAgents(onlyGid int, roles []string) [][]int {
 	return agents
 }
 
-func sendResult(result *CommandResult) {
+func sendResult(result *commands.Result) {
 	db := pool.Get()
 	defer db.Close()
 
@@ -174,16 +141,16 @@ func sendResult(result *CommandResult) {
 	}
 }
 
-func internalListAgents(cmd *CommandMessage) (interface{}, error) {
+func internalListAgents(cmd *commands.Command) (interface{}, error) {
 	return producersRoles, nil
 }
 
-var internals = map[string]func(*CommandMessage) (interface{}, error){
+var internals = map[string]func(*commands.Command) (interface{}, error){
 	"list_agents": internalListAgents,
 }
 
-func processInternalCommand(command CommandMessage) {
-	result := &CommandResult{
+func processInternalCommand(command commands.Command) {
+	result := &commands.Result{
 		ID:        command.ID,
 		Gid:       command.Gid,
 		Nid:       command.Nid,
@@ -237,7 +204,7 @@ func readSingleCmd() bool {
 	log.Println("Received message:", command)
 	command = InterceptCommand(command)
 	// parsing json data
-	var payload CommandMessage
+	var payload commands.Command
 	err = json.Unmarshal([]byte(command), &payload)
 
 	if err != nil {
@@ -259,7 +226,7 @@ func readSingleCmd() bool {
 		active := getActiveAgents(payload.Gid, payload.Roles)
 		if len(active) == 0 {
 			//no active agents that saticifies this role.
-			result := &CommandResult{
+			result := &commands.Result{
 				ID:        payload.ID,
 				Gid:       payload.Gid,
 				Nid:       payload.Nid,
@@ -286,7 +253,7 @@ func readSingleCmd() bool {
 		_, ok := producers[key]
 		if !ok {
 			//send error message to
-			result := &CommandResult{
+			result := &commands.Result{
 				ID:        payload.ID,
 				Gid:       payload.Gid,
 				Nid:       payload.Nid,
@@ -318,7 +285,7 @@ func readSingleCmd() bool {
 			log.Println("[-] push error: ", err)
 		}
 
-		resultPlaceholder := CommandResult{
+		resultPlaceholder := commands.Result{
 			ID:        payload.ID,
 			Gid:       gid,
 			Nid:       nid,
@@ -438,12 +405,12 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 					select {
 					case msgChan <- pending[1]:
 						//caller consumed this job, it's safe to set it's state to RUNNING now.
-						var payload CommandMessage
+						var payload commands.Command
 						if err := json.Unmarshal([]byte(pending[1]), &payload); err != nil {
 							break
 						}
 
-						resultPlacehoder := CommandResult{
+						resultPlacehoder := commands.Result{
 							ID:        payload.ID,
 							Gid:       igid,
 							Nid:       inid,
@@ -566,7 +533,7 @@ func result(c *gin.Context) {
 	}
 
 	// decode body
-	var payload CommandResult
+	var payload commands.Result
 	err = json.Unmarshal(content, &payload)
 
 	if err != nil {

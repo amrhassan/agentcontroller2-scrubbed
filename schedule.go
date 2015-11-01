@@ -6,6 +6,7 @@ import (
 	"github.com/pborman/uuid"
 	"github.com/robfig/cron"
 	"log"
+	"github.com/Jumpscale/agentcontroller2/commands"
 )
 
 const (
@@ -49,7 +50,7 @@ func NewScheduler(pool *redis.Pool) *Scheduler {
 }
 
 //create a schdule with the cmd ID (overrides old ones) and
-func (sched *Scheduler) Add(cmd *CommandMessage) (interface{}, error) {
+func (sched *Scheduler) Add(cmd *commands.Command) (interface{}, error) {
 	defer sched.restart()
 
 	db := sched.pool.Get()
@@ -76,14 +77,14 @@ func (sched *Scheduler) Add(cmd *CommandMessage) (interface{}, error) {
 	return true, nil
 }
 
-func (sched *Scheduler) List(cmd *CommandMessage) (interface{}, error) {
+func (sched *Scheduler) List(cmd *commands.Command) (interface{}, error) {
 	db := sched.pool.Get()
 	defer db.Close()
 
 	return redis.StringMap(db.Do("HGETALL", hashScheduleKey))
 }
 
-func (sched *Scheduler) Remove(cmd *CommandMessage) (interface{}, error) {
+func (sched *Scheduler) Remove(cmd *commands.Command) (interface{}, error) {
 	db := sched.pool.Get()
 	defer db.Close()
 
