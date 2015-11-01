@@ -8,6 +8,8 @@ type MessagingBus interface {
 	// Receives and returns a single command
 	ReceiveCommand() (*commands.Command, error)
 
+	DispatchCommandToAgent(gid, nid uint, command *commands.Command) error
+
 	// An associated error classifier
 	ErrorClassifier() MessagingBusErrorClassifier
 }

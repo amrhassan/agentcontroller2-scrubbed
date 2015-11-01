@@ -276,7 +276,7 @@ func readSingleCmd() bool {
 		nid := agent[1]
 
 		log.Println("Dispatching message to", agent)
-		if _, err := db.Do("RPUSH", getAgentQueue(gid, nid), command); err != nil {
+		if err := messagingBus.DispatchCommandToAgent(uint(gid), uint(nid), command); err != nil {
 			log.Println("[-] push error: ", err)
 		}
 

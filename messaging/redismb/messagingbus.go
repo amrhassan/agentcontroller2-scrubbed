@@ -6,6 +6,7 @@ import (
 	"github.com/garyburd/redigo/redis"
 	"encoding/json"
 	"strings"
+	"fmt"
 )
 
 type redisMessagingBus struct {
@@ -45,4 +46,20 @@ func (messagingBus redisMessagingBus) ReceiveCommand() (*commands.Command, error
 
 func (messagingBus redisMessagingBus) ErrorClassifier() messaging.MessagingBusErrorClassifier {
 	return errorClassifier{}
+}
+
+func getAgentQueue(gid, nid uint) string {
+	return fmt.Sprintf("cmds:%d:%d", gid, nid)
+}
+
+func (messagingBus redisMessagingBus) DispatchCommandToAgent(gid, nid uint, command *commands.Command) error {
+	db := messagingBus.pool.Get()
+	defer db.Close()
+
+	_, err := db.Do("RPUSH", getAgentQueue(gid, nid), command)
+	if err != nil {
+		return redisMBError{underlying: err, errorType: channelErrorType}
+	}
+
+	return nil
 }
