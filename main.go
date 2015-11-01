@@ -29,6 +29,7 @@ import (
 	"github.com/Jumpscale/agentcontroller2/commands"
 	"github.com/Jumpscale/agentcontroller2/messaging"
 	"github.com/Jumpscale/agentcontroller2/messaging/redismb"
+	"github.com/Jumpscale/agentcontroller2/logging"
 )
 
 const (
@@ -83,6 +84,7 @@ func newPool(addr string, password string) *redis.Pool {
 
 var pool *redis.Pool
 var messagingBus messaging.MessagingBus = redismb.NewRedisMessagingBus(pool)
+var logger = logging.NewRedisLogger(pool)
 
 
 func isTimeout(err error) bool {
@@ -262,7 +264,7 @@ func readSingleCmd() bool {
 	defer db.Close()
 
 	// push logs
-	if _, err := db.Do("LPUSH", logQueue, command); err != nil {
+	if err := logger.LogCommand(command); err != nil {
 		log.Println("[-] log push error: ", err)
 	}
 
