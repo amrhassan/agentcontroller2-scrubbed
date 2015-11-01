@@ -132,18 +132,9 @@ func getActiveAgents(onlyGid int, roles []string) [][]int {
 }
 
 func sendResult(result *commands.Result) {
-	db := pool.Get()
-	defer db.Close()
-
-	key := fmt.Sprintf("%d:%d", result.Gid, result.Nid)
-	if data, err := json.Marshal(&result); err == nil {
-		db.Do("HSET",
-			fmt.Sprintf(hashCmdResults, result.ID),
-			key,
-			data)
-
-		// push message to client result queue queue
-		db.Do("RPUSH", getAgentResultQueue(result), data)
+	err := messagingBus.SetCommandResult(result)
+	if err != nil {
+		log.Println("[-] failed to publish command result: {}", err.Error())
 	}
 }
 

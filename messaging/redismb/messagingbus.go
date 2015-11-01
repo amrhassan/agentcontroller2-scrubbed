@@ -96,3 +96,32 @@ func (messagingBus redisMessagingBus) RespondToCommandAsJustQueued(agentID messa
 
 	return nil
 }
+
+func getAgentResultQueue(result *commands.Result) string {
+	return fmt.Sprintf("cmd.%s.%d.%d", result.ID, result.Gid, result.Nid)
+}
+
+func (messagingBus redisMessagingBus) SetCommandResult(result *commands.Result) error {
+
+	db := messagingBus.pool.Get()
+	defer db.Close()
+
+	resultJson, err := json.Marshal(&result)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to marshal JSON for some reason!! %s", err.Error()))
+	}
+
+	key := fmt.Sprintf("%d:%d", result.Gid, result.Nid)
+	_, err = db.Do("HSET", fmt.Sprintf("jobresult:%s", result.ID), key, resultJson)
+	if err != nil {
+		return redisMBError{underlying: err, errorType: channelErrorType}
+	}
+
+	// push message to client result queue queue
+	_, err = db.Do("RPUSH", getAgentResultQueue(result), resultJson)
+	if err != nil {
+		return redisMBError{underlying: err, errorType: channelErrorType}
+	}
+
+	return nil
+}
