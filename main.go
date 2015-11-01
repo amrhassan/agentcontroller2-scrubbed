@@ -260,9 +260,6 @@ func readSingleCmd() bool {
 		}
 	}
 
-	db := pool.Get()
-	defer db.Close()
-
 	// push logs
 	if err := logger.LogCommand(command); err != nil {
 		log.Println("[-] log push error: ", err)
@@ -276,24 +273,17 @@ func readSingleCmd() bool {
 		nid := agent[1]
 
 		log.Println("Dispatching message to", agent)
-		if err := messagingBus.DispatchCommandToAgent(uint(gid), uint(nid), command); err != nil {
+		agentID := messaging.AgentID{GID: uint(gid), NID: uint(nid)}
+
+		if err := messagingBus.DispatchCommandToAgent(agentID, command); err != nil {
 			log.Println("[-] push error: ", err)
 		}
 
-		resultPlaceholder := commands.Result{
-			ID:        command.ID,
-			Gid:       gid,
-			Nid:       nid,
-			State:     "QUEUED",
-			StartTime: int64(time.Duration(time.Now().UnixNano()) / time.Millisecond),
+		err = messagingBus.RespondToCommandAsJustQueued(agentID, command)
+		if err != nil {
+			log.Println("[-] command response error: ", err)
 		}
 
-		if data, err := json.Marshal(&resultPlaceholder); err == nil {
-			db.Do("HSET",
-				fmt.Sprintf(hashCmdResults, command.ID),
-				fmt.Sprintf("%d:%d", gid, nid),
-				data)
-		}
 	}
 
 	signalQueues(command.ID)

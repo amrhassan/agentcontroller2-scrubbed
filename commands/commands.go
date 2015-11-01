@@ -22,3 +22,7 @@ type Result struct {
 	Level     int    `json:"level"`
 	StartTime int64  `json:"starttime"`
 }
+
+const (
+	STATE_QUEUED = "QUEUED"
+)

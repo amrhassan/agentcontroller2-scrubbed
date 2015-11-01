@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"strings"
 	"fmt"
+	"time"
 )
 
 type redisMessagingBus struct {
@@ -48,15 +49,47 @@ func (messagingBus redisMessagingBus) ErrorClassifier() messaging.MessagingBusEr
 	return errorClassifier{}
 }
 
-func getAgentQueue(gid, nid uint) string {
-	return fmt.Sprintf("cmds:%d:%d", gid, nid)
+func getAgentQueue(agentID messaging.AgentID) string {
+	return fmt.Sprintf("cmds:%d:%d", agentID.GID, agentID.NID)
 }
 
-func (messagingBus redisMessagingBus) DispatchCommandToAgent(gid, nid uint, command *commands.Command) error {
+func (messagingBus redisMessagingBus) DispatchCommandToAgent(agentID messaging.AgentID,
+	command *commands.Command) error {
+
 	db := messagingBus.pool.Get()
 	defer db.Close()
 
-	_, err := db.Do("RPUSH", getAgentQueue(gid, nid), command)
+	_, err := db.Do("RPUSH", getAgentQueue(agentID), command)
+	if err != nil {
+		return redisMBError{underlying: err, errorType: channelErrorType}
+	}
+
+	return nil
+}
+
+func (messagingBus redisMessagingBus) RespondToCommandAsJustQueued(agentID messaging.AgentID,
+	command *commands.Command) error {
+
+	db := messagingBus.pool.Get()
+	defer db.Close()
+
+	resultPlaceholder := commands.Result{
+		ID:        command.ID,
+		Gid:       int(agentID.GID),
+		Nid:       int(agentID.NID),
+		State:     commands.STATE_QUEUED,
+		StartTime: int64(time.Duration(time.Now().UnixNano()) / time.Millisecond),
+	}
+
+	data, err := json.Marshal(&resultPlaceholder)
+
+	if err != nil {
+		panic(fmt.Sprintf("Failed to marshal JSON for some reason!! %s", err))
+	}
+
+	_, err =
+		db.Do("HSET", fmt.Sprintf("jobresult:%s", command.ID), fmt.Sprintf("%d:%d", agentID.GID, agentID.NID), data)
+
 	if err != nil {
 		return redisMBError{underlying: err, errorType: channelErrorType}
 	}
