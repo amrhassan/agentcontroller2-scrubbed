@@ -22,6 +22,10 @@ type MessagingBus interface {
 	// Publishes an update to a command's result
 	SetCommandResult(commandResult *commands.Result) error
 
+	// Signals a command as queued
+	// TODO: Figure out why this is necessary and find a cleaner way to do this in another command
+	SignalCommandAsQueued(commandID string) error
+
 	// An associated error classifier
 	ErrorClassifier() MessagingBusErrorClassifier
 }

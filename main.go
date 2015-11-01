@@ -178,9 +178,10 @@ func processInternalCommand(command *commands.Command) {
 }
 
 func signalQueues(id string) {
-	db := pool.Get()
-	defer db.Close()
-	db.Do("RPUSH", fmt.Sprintf(cmdQueueCmdQueued, id), "queued")
+	err := messagingBus.SignalCommandAsQueued(id)
+	if err != nil {
+		log.Printf("[-] failed to signal command as queued %s", err.Error())
+	}
 }
 
 func readSingleCmd() bool {

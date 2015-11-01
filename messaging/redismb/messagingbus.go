@@ -128,3 +128,16 @@ func (messagingBus redisMessagingBus) SetCommandResult(result *commands.Result) 
 
 	return nil
 }
+
+func (messagingBus redisMessagingBus) SignalCommandAsQueued(commandID string) error {
+	db := messagingBus.pool.Get()
+	defer db.Close()
+
+	_, err := db.Do("RPUSH", fmt.Sprintf(cmdQueueCmdQueued, commandID), "queued")
+
+	if err != nil {
+		return redisMBError{underlying: err, errorType: channelErrorType}
+	}
+
+	return nil
+}
