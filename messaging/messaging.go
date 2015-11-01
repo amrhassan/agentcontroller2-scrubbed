@@ -10,7 +10,7 @@ type AgentID struct {
 // The messaging bus on which AgentController communicates with Agent instances
 type MessagingBus interface {
 
-	// Receives and returns a single command
+	// Receives and returns a single command without blocking, returning nil if there weren't any
 	ReceiveCommand() (*commands.Command, error)
 
 	// Dispatches a received command to an Agent somewhere
