@@ -56,7 +56,7 @@ func getAgentQueue(agentID messaging.AgentID) string {
 	return fmt.Sprintf("cmds:%d:%d", agentID.GID, agentID.NID)
 }
 
-func (messagingBus redisMessagingBus) DispatchCommandToAgent(agentID messaging.AgentID,
+func (messagingBus redisMessagingBus) QueueCommandToAgent(agentID messaging.AgentID,
 	command *commands.Command) error {
 
 	db := messagingBus.pool.Get()
