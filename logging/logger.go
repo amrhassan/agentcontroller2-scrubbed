@@ -1,10 +1,10 @@
 // Persistent logs
 package logging
 
-import "github.com/Jumpscale/agentcontroller2/commands"
+import "github.com/Jumpscale/agentcontroller2/core"
 
 type Logger interface {
 
 	// Log the reception  of a certain command
-	LogCommand(command *commands.Command) error
+	LogCommand(command *core.Command) error
 }

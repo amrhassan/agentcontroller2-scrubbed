@@ -26,7 +26,7 @@ import (
 	"github.com/gin-gonic/gin"
 	influxdb "github.com/influxdb/influxdb/client"
 
-	"github.com/Jumpscale/agentcontroller2/commands"
+	"github.com/Jumpscale/agentcontroller2/core"
 	"github.com/Jumpscale/agentcontroller2/messaging"
 	"github.com/Jumpscale/agentcontroller2/messaging/redismb"
 	"github.com/Jumpscale/agentcontroller2/logging"
@@ -95,7 +95,7 @@ func getAgentQueue(gid int, nid int) string {
 	return fmt.Sprintf("cmds:%d:%d", gid, nid)
 }
 
-func getAgentResultQueue(result *commands.Result) string {
+func getAgentResultQueue(result *core.CommandResult) string {
 	return fmt.Sprintf(cmdQueueAgentResponse, result.ID, result.Gid, result.Nid)
 }
 
@@ -131,23 +131,23 @@ func getActiveAgents(onlyGid int, roles []string) [][]int {
 	return agents
 }
 
-func sendResult(result *commands.Result) {
+func sendResult(result *core.CommandResult) {
 	err := messagingBus.SetCommandResult(result)
 	if err != nil {
 		log.Println("[-] failed to publish command result: {}", err.Error())
 	}
 }
 
-func internalListAgents(cmd *commands.Command) (interface{}, error) {
+func internalListAgents(cmd *core.Command) (interface{}, error) {
 	return producersRoles, nil
 }
 
-var internals = map[string]func(*commands.Command) (interface{}, error){
+var internals = map[string]func(*core.Command) (interface{}, error){
 	"list_agents": internalListAgents,
 }
 
-func processInternalCommand(command *commands.Command) {
-	result := &commands.Result{
+func processInternalCommand(command *core.Command) {
+	result := &core.CommandResult{
 		ID:        command.ID,
 		Gid:       command.Gid,
 		Nid:       command.Nid,
@@ -210,7 +210,7 @@ func readSingleCmd() bool {
 		active := getActiveAgents(command.Gid, command.Roles)
 		if len(active) == 0 {
 			//no active agents that saticifies this role.
-			result := &commands.Result{
+			result := &core.CommandResult{
 				ID:        command.ID,
 				Gid:       command.Gid,
 				Nid:       command.Nid,
@@ -237,7 +237,7 @@ func readSingleCmd() bool {
 		_, ok := producers[key]
 		if !ok {
 			//send error message to
-			result := &commands.Result{
+			result := &core.CommandResult{
 				ID:        command.ID,
 				Gid:       command.Gid,
 				Nid:       command.Nid,
@@ -265,7 +265,7 @@ func readSingleCmd() bool {
 		nid := agent[1]
 
 		log.Println("Dispatching message to", agent)
-		agentID := messaging.AgentID{GID: uint(gid), NID: uint(nid)}
+		agentID := core.AgentID{GID: uint(gid), NID: uint(nid)}
 
 		if err := messagingBus.QueueCommandToAgent(agentID, command); err != nil {
 			log.Println("[-] push error: ", err)
@@ -382,12 +382,12 @@ func getProducerChan(gid string, nid string) chan<- *PollData {
 					select {
 					case msgChan <- pending[1]:
 						//caller consumed this job, it's safe to set it's state to RUNNING now.
-						var payload commands.Command
+						var payload core.Command
 						if err := json.Unmarshal([]byte(pending[1]), &payload); err != nil {
 							break
 						}
 
-						resultPlacehoder := commands.Result{
+						resultPlacehoder := core.CommandResult{
 							ID:        payload.ID,
 							Gid:       igid,
 							Nid:       inid,
@@ -510,7 +510,7 @@ func result(c *gin.Context) {
 	}
 
 	// decode body
-	var payload commands.Result
+	var payload core.CommandResult
 	err = json.Unmarshal(content, &payload)
 
 	if err != nil {

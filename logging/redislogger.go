@@ -1,7 +1,7 @@
 package logging
 
 import (
-	"github.com/Jumpscale/agentcontroller2/commands"
+	"github.com/Jumpscale/agentcontroller2/core"
 	"github.com/garyburd/redigo/redis"
 )
 
@@ -9,7 +9,7 @@ type redisLogger struct {
 	pool *redis.Pool
 }
 
-func (logger *redisLogger) LogCommand(command *commands.Command) error {
+func (logger *redisLogger) LogCommand(command *core.Command) error {
 	db := logger.pool.Get()
 	defer db.Close()
 

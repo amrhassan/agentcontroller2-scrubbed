@@ -1,4 +1,4 @@
-package commands
+package core
 
 type Command struct {
 	ID     string   `json:"id"`
@@ -13,7 +13,7 @@ type Command struct {
 	} `json:"args"`
 }
 
-type Result struct {
+type CommandResult struct {
 	ID        string `json:"id"`
 	Nid       int    `json:"nid"`
 	Gid       int    `json:"gid"`

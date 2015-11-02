@@ -1,7 +1,7 @@
 package redismb
 
 import (
-	"github.com/Jumpscale/agentcontroller2/commands"
+	"github.com/Jumpscale/agentcontroller2/core"
 	"github.com/Jumpscale/agentcontroller2/messaging"
 	"github.com/garyburd/redigo/redis"
 	"encoding/json"
@@ -21,7 +21,7 @@ const (
 	hashCmdResults            = "jobresult:%s"
 )
 
-func (messagingBus redisMessagingBus) ReceiveCommand() (*commands.Command, error) {
+func (messagingBus redisMessagingBus) ReceiveCommand() (*core.Command, error) {
 
 	db := messagingBus.pool.Get()
 	defer db.Close()
@@ -38,7 +38,7 @@ func (messagingBus redisMessagingBus) ReceiveCommand() (*commands.Command, error
 	}
 
 	commandText := message[1]
-	var command commands.Command
+	var command core.Command
 
 	err = json.Unmarshal([]byte(commandText), &command)
 	if err != nil {
@@ -52,12 +52,12 @@ func (messagingBus redisMessagingBus) ErrorClassifier() messaging.MessagingBusEr
 	return errorClassifier{}
 }
 
-func getAgentQueue(agentID messaging.AgentID) string {
+func getAgentQueue(agentID core.AgentID) string {
 	return fmt.Sprintf("cmds:%d:%d", agentID.GID, agentID.NID)
 }
 
-func (messagingBus redisMessagingBus) QueueCommandToAgent(agentID messaging.AgentID,
-	command *commands.Command) error {
+func (messagingBus redisMessagingBus) QueueCommandToAgent(agentID core.AgentID,
+	command *core.Command) error {
 
 	db := messagingBus.pool.Get()
 	defer db.Close()
@@ -70,17 +70,17 @@ func (messagingBus redisMessagingBus) QueueCommandToAgent(agentID messaging.Agen
 	return nil
 }
 
-func (messagingBus redisMessagingBus) RespondToCommandAsJustQueued(agentID messaging.AgentID,
-	command *commands.Command) error {
+func (messagingBus redisMessagingBus) RespondToCommandAsJustQueued(agentID core.AgentID,
+	command *core.Command) error {
 
 	db := messagingBus.pool.Get()
 	defer db.Close()
 
-	resultPlaceholder := commands.Result{
+	resultPlaceholder := core.CommandResult{
 		ID:        command.ID,
 		Gid:       int(agentID.GID),
 		Nid:       int(agentID.NID),
-		State:     commands.STATE_QUEUED,
+		State:     core.STATE_QUEUED,
 		StartTime: int64(time.Duration(time.Now().UnixNano()) / time.Millisecond),
 	}
 
@@ -100,11 +100,11 @@ func (messagingBus redisMessagingBus) RespondToCommandAsJustQueued(agentID messa
 	return nil
 }
 
-func getAgentResultQueue(result *commands.Result) string {
+func getAgentResultQueue(result *core.CommandResult) string {
 	return fmt.Sprintf(cmdQueueAgentResponse, result.ID, result.Gid, result.Nid)
 }
 
-func (messagingBus redisMessagingBus) SetCommandResult(result *commands.Result) error {
+func (messagingBus redisMessagingBus) SetCommandResult(result *core.CommandResult) error {
 
 	db := messagingBus.pool.Get()
 	defer db.Close()
