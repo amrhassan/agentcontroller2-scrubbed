@@ -27,9 +27,7 @@ import (
 	influxdb "github.com/influxdb/influxdb/client"
 
 	"github.com/Jumpscale/agentcontroller2/core"
-	"github.com/Jumpscale/agentcontroller2/messaging"
-	"github.com/Jumpscale/agentcontroller2/messaging/redismb"
-	"github.com/Jumpscale/agentcontroller2/logging"
+	"github.com/Jumpscale/agentcontroller2/redisdata"
 )
 
 const (
@@ -83,8 +81,11 @@ func newPool(addr string, password string) *redis.Pool {
 }
 
 var pool *redis.Pool
-var messagingBus messaging.MessagingBus = redismb.NewRedisMessagingBus(pool)
-var logger = logging.NewRedisLogger(pool)
+var redisData = redisdata.NewRedisData(pool)
+
+var incomingCommands core.Incoming = redisData
+var commandStorage core.CommandStorage = redisData
+var logger core.CommandLogger = redisData
 
 
 func isTimeout(err error) bool {
@@ -132,7 +133,7 @@ func getActiveAgents(onlyGid int, roles []string) [][]int {
 }
 
 func sendResult(result *core.CommandResult) {
-	err := messagingBus.SetCommandResult(result)
+	err := redisData.SetCommandResult(result)
 	if err != nil {
 		log.Println("[-] failed to publish command result: {}", err.Error())
 	}
@@ -178,7 +179,7 @@ func processInternalCommand(command *core.Command) {
 }
 
 func signalQueues(id string) {
-	err := messagingBus.SignalCommandAsQueued(id)
+	err := redisData.SignalCommandAsQueued(id)
 	if err != nil {
 		log.Printf("[-] failed to signal command as queued %s", err.Error())
 	}
@@ -186,13 +187,13 @@ func signalQueues(id string) {
 
 func readSingleCmd() bool {
 
-	command, err := messagingBus.ReceiveCommand()
+	command, err := incomingCommands.ReceiveCommand()
 	if err != nil {
 		switch {
-		case messagingBus.ErrorClassifier().IsChannelError(err):
-			log.Fatal("Coulnd't read new commands from redis", err)
-		case messagingBus.ErrorClassifier().IsCommandFormatError(err):
-			log.Println("message decoding error:", err)
+		case incomingCommands.IsCommandFormatError(err):
+			log.Fatal("Incoming command id malformed: %v", err)
+		default:
+			log.Fatal("Data store error: %v", err)
 		}
 	}
 
@@ -267,11 +268,12 @@ func readSingleCmd() bool {
 		log.Println("Dispatching message to", agent)
 		agentID := core.AgentID{GID: uint(gid), NID: uint(nid)}
 
-		if err := messagingBus.QueueCommandToAgent(agentID, command); err != nil {
+		err := commandStorage.QueueReceivedCommand(agentID, command)
+		if err != nil {
 			log.Println("[-] push error: ", err)
 		}
 
-		err = messagingBus.RespondToCommandAsJustQueued(agentID, command)
+		err = redisData.RespondToCommandAsJustQueued(agentID, command)
 		if err != nil {
 			log.Println("[-] command response error: ", err)
 		}

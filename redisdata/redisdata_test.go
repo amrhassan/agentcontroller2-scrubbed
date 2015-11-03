@@ -1,0 +1,18 @@
+package redisdata
+import (
+	"testing"
+	"github.com/stretchr/testify/assert"
+	"github.com/Jumpscale/agentcontroller2/core"
+)
+
+func TestImplementsCoreIncoming(t *testing.T) {
+	assert.Implements(t, (*core.Incoming)(nil), new(RedisData))
+}
+
+func TestImplementsCoreCommandStorage(t *testing.T) {
+	assert.Implements(t, (*core.CommandStorage)(nil), new(RedisData))
+}
+
+func TestImplementsCoreCommandLogger(t *testing.T) {
+	assert.Implements(t, (*core.CommandLogger)(nil), new(RedisData))
+}
