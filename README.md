@@ -1,4 +1,6 @@
 # agentcontroller2
+[![Build Status](https://travis-ci.org/amrhassan/agentcontroller2.svg?branch=master)](https://travis-ci.org/amrhassan/agentcontroller2)
+
 JumpScale agentcontroller2 in Go
 
 # Installation
