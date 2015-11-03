@@ -1,6 +1,6 @@
 package redisdata
 import (
-	"github.com/Jumpscale/agentcontroller2/core"
+	"github.com/amrhassan/agentcontroller2/core"
 	"github.com/garyburd/redigo/redis"
 	"strings"
 	"encoding/json"

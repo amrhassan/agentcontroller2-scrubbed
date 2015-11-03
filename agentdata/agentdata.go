@@ -1,6 +1,6 @@
 package agentdata
 import (
-	"github.com/Jumpscale/agentcontroller2/core"
+	"github.com/amrhassan/agentcontroller2/core"
 	"sync"
 )
 

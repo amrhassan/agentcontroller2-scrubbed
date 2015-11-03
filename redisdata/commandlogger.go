@@ -1,5 +1,5 @@
 package redisdata
-import "github.com/Jumpscale/agentcontroller2/core"
+import "github.com/amrhassan/agentcontroller2/core"
 
 
 func (redisData *RedisData) LogCommand(command *core.Command) error {

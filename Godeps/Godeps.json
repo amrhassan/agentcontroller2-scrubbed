@@ -1,5 +1,5 @@
 {
-	"ImportPath": "github.com/Jumpscale/agentcontroller2",
+	"ImportPath": "github.com/amrhassan/agentcontroller2",
 	"GoVersion": "go1.5.1",
 	"Deps": [
 		{

@@ -26,8 +26,8 @@ import (
 	"github.com/gin-gonic/gin"
 	influxdb "github.com/influxdb/influxdb/client"
 
-	"github.com/Jumpscale/agentcontroller2/core"
-	"github.com/Jumpscale/agentcontroller2/redisdata"
+	"github.com/amrhassan/agentcontroller2/core"
+	"github.com/amrhassan/agentcontroller2/redisdata"
 )
 
 const (

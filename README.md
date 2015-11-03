@@ -3,7 +3,7 @@ JumpScale agentcontroller2 in Go
 
 # Installation
 ```
-go get github.com/Jumpscale/agentcontroller2
+go get github.com/amrhassan/agentcontroller2
 ```
 
 # Running jsagencontroller

@@ -2,7 +2,7 @@ package redisdata
 import (
 	"testing"
 	"github.com/stretchr/testify/assert"
-	"github.com/Jumpscale/agentcontroller2/core"
+	"github.com/amrhassan/agentcontroller2/core"
 )
 
 func TestImplementsCoreIncoming(t *testing.T) {

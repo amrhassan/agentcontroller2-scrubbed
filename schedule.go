@@ -6,7 +6,7 @@ import (
 	"github.com/pborman/uuid"
 	"github.com/robfig/cron"
 	"log"
-	"github.com/Jumpscale/agentcontroller2/core"
+	"github.com/amrhassan/agentcontroller2/core"
 )
 
 const (
