@@ -85,7 +85,7 @@ var redisData = redisdata.NewRedisData(pool)
 
 var incomingCommands core.Incoming = redisData
 var commandStorage core.CommandStorage = redisData
-var logger core.CommandLogger = redisData
+var commandLogger core.CommandLogger = redisData
 
 
 func isTimeout(err error) bool {
@@ -254,7 +254,7 @@ func readSingleCmd() bool {
 	}
 
 	// push logs
-	if err := logger.LogCommand(command); err != nil {
+	if err := commandLogger.LogCommand(command); err != nil {
 		log.Println("[-] log push error: ", err)
 	}
 
