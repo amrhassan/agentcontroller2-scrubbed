@@ -57,6 +57,8 @@ func (data *agentData) ConnectedAgents() []core.AgentID {
 
 func (data *agentData) HasRole(id core.AgentID, role core.AgentRole) bool {
 
+	// TODO: This can check on the internal map without using the copy returned by GetRoles()
+
 	roles := data.GetRoles(id)
 
 	if roles == nil {
