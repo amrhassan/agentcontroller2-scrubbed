@@ -74,6 +74,11 @@ func (data *agentData) HasRole(id core.AgentID, role core.AgentRole) bool {
 	return false
 }
 
+func (data *agentData) IsConnected(id core.AgentID) bool {
+	// TODO
+	panic("TODO")
+}
+
 // Constructs a new thread-safe in-memory implementation of core.AgentInformationStorage
 func NewAgentData() core.AgentInformationStorage {
 	return &agentData{

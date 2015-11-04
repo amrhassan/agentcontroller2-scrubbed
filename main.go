@@ -28,6 +28,8 @@ import (
 
 	"github.com/amrhassan/agentcontroller2/core"
 	"github.com/amrhassan/agentcontroller2/redisdata"
+	"github.com/amrhassan/agentcontroller2/agentdata"
+	"github.com/amrhassan/agentcontroller2/theproducers"
 )
 
 const (
@@ -92,55 +94,30 @@ func isTimeout(err error) bool {
 	return strings.Contains(err.Error(), "timeout")
 }
 
-func getAgentQueue(gid int, nid int) string {
-	return fmt.Sprintf("cmds:%d:%d", gid, nid)
-}
-
 func getAgentResultQueue(result *core.CommandResult) string {
 	return fmt.Sprintf(cmdQueueAgentResponse, result.ID, result.Gid, result.Nid)
 }
 
-func getActiveAgents(onlyGid int, roles []string) [][]int {
-	producersLock.Lock()
-	defer producersLock.Unlock()
-
-	checkRole := len(roles) > 0 && roles[0] != roleAll
-	agents := make([][]int, 0, 10)
-	for key := range producers {
-		var gid, nid int
-		fmt.Sscanf(key, "%d:%d", &gid, &nid)
-		if onlyGid > 0 && onlyGid != gid {
-			continue
-		}
-
-		if checkRole {
-			agentRoles := producersRoles[key]
-			match := true
-			for _, r := range roles {
-				if !In(agentRoles, r) {
-					match = false
-					break
-				}
-			}
-			if !match {
-				continue
-			}
-		}
-		agents = append(agents, []int{gid, nid})
-	}
-
-	return agents
+// Returns the connected agents.
+// If onlyGID is nonzero, returns only the agents with the specified onlyGID as their GID
+// If roles is set and non-empty, returns only the agents with ALL of the specified roles
+func getActiveAgents(onlyGid int, roles []string) []core.AgentID {
+	// TODO
+	panic("TODO")
 }
 
 func sendResult(result *core.CommandResult) {
-	err := redisData.SetCommandResult(result)
+	err := commandStorage.SetCommandResult(result)
 	if err != nil {
 		log.Println("[-] failed to publish command result: {}", err.Error())
 	}
 }
 
 func internalListAgents(cmd *core.Command) (interface{}, error) {
-	return producersRoles, nil
+//	return producersRoles, nil
+	// What does this even do?
+	// TODO
+	panic("TODO")
 }
 
 var internals = map[string]func(*core.Command) (interface{}, error){
@@ -234,9 +211,9 @@ func readSingleCmd() bool {
 			}
 		}
 	} else {
-		key := fmt.Sprintf("%d:%d", command.Gid, command.Nid)
-		_, ok := producers[key]
-		if !ok {
+//		key := fmt.Sprintf("%d:%d", command.Gid, command.Nid)
+//		_, ok := producers[key]
+		if ! agentData.IsConnected(core.AgentID{GID: uint(command.Gid), NID: uint(command.Nid)}) {
 			//send error message to
 			result := &core.CommandResult{
 				ID:        command.ID,
@@ -305,124 +282,25 @@ func In(l []string, x string) bool {
 	return false
 }
 
-var producers = make(map[string]chan *PollData)
-var producersRoles = make(map[string][]string)
+var agentData = agentdata.NewAgentData()
+var producers = theproducers.NewProducers(agentData, commandStorage)
 
-// var activeRoles map[string]int = make(map[string]int)
-// var activeGridRoles map[string]map[string]int = make(map[string]map[string]int)
-var producersLock sync.Mutex
+func getProducerChan(gid string, nid string) chan<- theproducers.PollData {
 
-/*
-PollData Gets a chain for the caller to wait on, we return a chan chan string instead
-of chan string directly to make sure of the following:
-1- The redis pop loop will not try to pop jobs out of the queue until there is a caller waiting
-   for new commands
-2- Prevent multiple clients polling on a single gid:nid at the same time.
-*/
-type PollData struct {
-	Roles   []string
-	MsgChan chan string
-}
-
-func getProducerChan(gid string, nid string) chan<- *PollData {
-	key := fmt.Sprintf("%s:%s", gid, nid)
-
-	producersLock.Lock()
-	producer, ok := producers[key]
-	if !ok {
-		igid, _ := strconv.Atoi(gid)
-		inid, _ := strconv.Atoi(nid)
-		//start routine for this agent.
-		log.Printf("Agent %s:%s active, starting agent routine\n", gid, nid)
-
-		producer = make(chan *PollData)
-		producers[key] = producer
-		go func() {
-			//db := pool.Get()
-
-			defer func() {
-				//db.Close()
-
-				//no agent tried to connect
-				close(producer)
-				producersLock.Lock()
-				defer producersLock.Unlock()
-				delete(producers, key)
-				delete(producersRoles, key)
-			}()
-
-			for {
-				if !func() bool {
-					var data *PollData
-
-					select {
-					case data = <-producer:
-					case <-time.After(agentInteractiveAfterOver):
-						//no active agent for 10 min
-						log.Println("Agent", key, "is inactive for over ", agentInteractiveAfterOver, ", cleaning up.")
-						return false
-					}
-
-					msgChan := data.MsgChan
-					defer close(msgChan)
-
-					roles := data.Roles
-					producersRoles[key] = roles
-
-					db := pool.Get()
-					defer db.Close()
-
-					pending, err := redis.Strings(db.Do("BLPOP", getAgentQueue(igid, inid), "0"))
-					if err != nil {
-						if !isTimeout(err) {
-							log.Println("Couldn't get new job for agent", key, err)
-						}
-
-						return true
-					}
-
-					select {
-					case msgChan <- pending[1]:
-						//caller consumed this job, it's safe to set it's state to RUNNING now.
-						var payload core.Command
-						if err := json.Unmarshal([]byte(pending[1]), &payload); err != nil {
-							break
-						}
-
-						resultPlacehoder := core.CommandResult{
-							ID:        payload.ID,
-							Gid:       igid,
-							Nid:       inid,
-							State:     "RUNNING",
-							StartTime: int64(time.Duration(time.Now().UnixNano()) / time.Millisecond),
-						}
-
-						if data, err := json.Marshal(&resultPlacehoder); err == nil {
-							db.Do("HSET",
-								fmt.Sprintf(hashCmdResults, payload.ID),
-								key,
-								data)
-						}
-					default:
-						//caller didn't want to receive this command. have to repush it
-						//directly on the agent queue. to avoid doing the redispatching.
-						if pending[1] != "" {
-							db.Do("LPUSH", getAgentQueue(igid, inid), pending[1])
-						}
-					}
-
-					return true
-				}() {
-					return
-				}
-			}
-
-		}()
+	igid, err := strconv.Atoi(gid)
+	if err != nil {
+		panic(err)
 	}
-	producersLock.Unlock()
+	inid, err := strconv.Atoi(nid)
+	if err != nil {
+		panic(err)
+	}
 
-	return producer
+	agentID := core.AgentID{GID: uint(igid), NID: uint(inid)}
+
+	return producers.Get(agentID)
 }
+
 
 // REST stuff
 func cmd(c *gin.Context) {
@@ -440,7 +318,7 @@ func cmd(c *gin.Context) {
 
 	producer := getProducerChan(gid, nid)
 
-	data := &PollData{
+	data := theproducers.PollData{
 		Roles:   roles,
 		MsgChan: make(chan string),
 	}

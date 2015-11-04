@@ -38,7 +38,7 @@ func (store *RedisCommandStorage) QueueReceivedCommand(agentID core.AgentID, com
 
 
 // Communication errors in the command-producing channels are swallowed and handled discretely
-func (store *RedisCommandStorage) CommandsForAgent(agentID core.AgentID) (chan <- core.Command) {
+func (store *RedisCommandStorage) CommandsForAgent(agentID core.AgentID) (<- chan core.Command) {
 
 	// Beware: Messy mutex synchronization ahead!
 
@@ -91,4 +91,29 @@ func (store *RedisCommandStorage) ReportUndeliveredCommand(agentID core.AgentID,
 
 	_, err = conn.Do("LPUSH", getAgentQueue(agentID), commandJson)
 	return err
+}
+
+func (store *RedisCommandStorage) SetCommandResult(result *core.CommandResult) error {
+
+	db := store.pool.Get()
+	defer db.Close()
+
+	resultJson, err := json.Marshal(&result)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to marshal JSON for some reason!! %s", err.Error()))
+	}
+
+	key := fmt.Sprintf("%d:%d", result.Gid, result.Nid)
+	_, err = db.Do("HSET", fmt.Sprintf(hashCmdResults, result.ID), key, resultJson)
+	if err != nil {
+		return fmt.Errorf("%s: %v", redisErrorMessage, err)
+	}
+
+	// push message to client result queue queue
+	_, err = db.Do("RPUSH", getAgentResultQueue(result), resultJson)
+	if err != nil {
+		return fmt.Errorf("%s: %v", redisErrorMessage, err)
+	}
+
+	return nil
 }

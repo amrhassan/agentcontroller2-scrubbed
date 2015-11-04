@@ -24,4 +24,6 @@ type AgentInformationStorage interface {
 
 	// Queries for all the available Agents
 	ConnectedAgents() []AgentID
+
+	IsConnected(id AgentID) bool
 }
