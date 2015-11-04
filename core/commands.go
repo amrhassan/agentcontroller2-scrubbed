@@ -24,5 +24,6 @@ type CommandResult struct {
 }
 
 const (
-	STATE_QUEUED = "QUEUED"
+	COMMAND_STATE_QUEUED = "QUEUED"
+	COMMAND_STATE_RUNNING = "RUNNING"
 )

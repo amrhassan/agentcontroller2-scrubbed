@@ -16,7 +16,7 @@ func (redisData *RedisData) RespondToCommandAsJustQueued(agentID core.AgentID, c
 		ID:        command.ID,
 		Gid:       int(agentID.GID),
 		Nid:       int(agentID.NID),
-		State:     core.STATE_QUEUED,
+		State:     core.COMMAND_STATE_QUEUED,
 		StartTime: int64(time.Duration(time.Now().UnixNano()) / time.Millisecond),
 	}
 

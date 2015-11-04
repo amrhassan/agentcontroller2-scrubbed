@@ -29,7 +29,7 @@ import (
 	"github.com/amrhassan/agentcontroller2/core"
 	"github.com/amrhassan/agentcontroller2/redisdata"
 	"github.com/amrhassan/agentcontroller2/agentdata"
-	"github.com/amrhassan/agentcontroller2/theproducers"
+	"github.com/amrhassan/agentcontroller2/agentpoll"
 )
 
 const (
@@ -279,9 +279,9 @@ func In(l []string, x string) bool {
 }
 
 var agentData = agentdata.NewAgentData()
-var producers = theproducers.NewProducers(agentData, commandStorage)
+var producers = agentpoll.NewManager(agentData, commandStorage)
 
-func getProducerChan(gid string, nid string) chan<- theproducers.PollData {
+func getProducerChan(gid string, nid string) chan<- agentpoll.PollData {
 
 	igid, err := strconv.Atoi(gid)
 	if err != nil {
@@ -314,9 +314,9 @@ func cmd(c *gin.Context) {
 
 	producer := getProducerChan(gid, nid)
 
-	data := theproducers.PollData{
+	data := agentpoll.PollData{
 		Roles:   roles,
-		MsgChan: make(chan string),
+		CommandChannel: make(chan core.Command),
 	}
 
 	select {
@@ -327,15 +327,20 @@ func cmd(c *gin.Context) {
 	}
 	//at this point we are sure this is the ONLY agent polling on /gid/nid/cmd
 
-	var payload string
+	var command core.Command
 
 	select {
-	case payload = <-data.MsgChan:
+	case command = <-data.CommandChannel:
 	case <-notify:
 	case <-time.After(timeout):
 	}
 
-	c.String(http.StatusOK, payload)
+	jsonCommand, err := json.Marshal(&command)
+	if err != nil {
+		panic(err)
+	}
+
+	c.String(http.StatusOK, string(jsonCommand))
 }
 
 func logs(c *gin.Context) {
