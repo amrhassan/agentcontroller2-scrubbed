@@ -90,10 +90,6 @@ var incomingCommands core.Incoming = redisData
 var commandLogger core.CommandLogger = redisData
 
 
-func isTimeout(err error) bool {
-	return strings.Contains(err.Error(), "timeout")
-}
-
 func getAgentResultQueue(result *core.CommandResult) string {
 	return fmt.Sprintf(cmdQueueAgentResponse, result.ID, result.Gid, result.Nid)
 }
