@@ -66,13 +66,18 @@ func (manager *PollDataStreamManager) Get(agentID core.AgentID) PollDataStream {
 	return producer
 }
 
-func pollDataStreamLogic(commandStorage core.CommandStorage, agentData core.AgentInformationStorage,
-	stream PollDataStream, agentID core.AgentID) {
+func pollDataStreamLogic(
+	commandStorage core.CommandStorage,
+	agentData core.AgentInformationStorage,
+	stream PollDataStream,
+	agentID core.AgentID) {
 
 	defer close(stream)
 	defer agentData.DropAgent(agentID)
 
 	for {
+
+		// Data to be received from the Agent
 		var data PollData
 
 		select {
@@ -80,9 +85,8 @@ func pollDataStreamLogic(commandStorage core.CommandStorage, agentData core.Agen
 		case data = <-stream:
 
 		case <-time.After(offlineAgentInactivityTimeout):
-			//no active agent for 10 min
 			log.Println(agentID, "is inactive for over ", offlineAgentInactivityTimeout, ", cleaning up.")
-			continue
+			return
 		}
 
 		defer close(data.CommandChannel)
@@ -99,9 +103,9 @@ func pollDataStreamLogic(commandStorage core.CommandStorage, agentData core.Agen
 
 		select {
 		case data.CommandChannel <- command:
-		//caller consumed this job, it's safe to set it's state to RUNNING now.
 
-			resultPlacehoder := core.CommandResult{
+			// Agent consumed this job, it's safe to set it's state to RUNNING now.
+			commandResult := core.CommandResult{
 				ID:        command.ID,
 				Gid:       command.Gid,
 				Nid:       command.Nid,
@@ -109,11 +113,10 @@ func pollDataStreamLogic(commandStorage core.CommandStorage, agentData core.Agen
 				StartTime: int64(time.Duration(time.Now().UnixNano()) / time.Millisecond),
 			}
 
-			commandStorage.SetCommandResult(&resultPlacehoder)
+			commandStorage.SetCommandResult(&commandResult)
 
 		default:
-			//caller didn't want to receive this command. have to repush it
-			//directly on the agent queue. to avoid doing the redispatching.
+			// Agent did not receive this command.
 			commandStorage.ReportUndeliveredCommand(agentID, &command)
 		}
 	}
