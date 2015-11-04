@@ -136,7 +136,7 @@ func processInternalCommand(command *core.Command) {
 		ID:        command.ID,
 		Gid:       command.Gid,
 		Nid:       command.Nid,
-		State:     "ERROR",
+		State:     core.COMMAND_STATE_ERROR,
 		StartTime: int64(time.Duration(time.Now().UnixNano()) / time.Millisecond),
 	}
 
@@ -199,7 +199,7 @@ func readSingleCmd() bool {
 				ID:        command.ID,
 				Gid:       command.Gid,
 				Nid:       command.Nid,
-				State:     "ERROR",
+				State:     core.COMMAND_STATE_ERROR,
 				Data:      fmt.Sprintf("No agents with role '%v' alive!", command.Roles),
 				StartTime: int64(time.Duration(time.Now().UnixNano()) / time.Millisecond),
 			}
@@ -226,7 +226,7 @@ func readSingleCmd() bool {
 				ID:        command.ID,
 				Gid:       command.Gid,
 				Nid:       command.Nid,
-				State:     "ERROR",
+				State:     core.COMMAND_STATE_ERROR,
 				Data:      fmt.Sprintf("Agent is not alive!"),
 				StartTime: int64(time.Duration(time.Now().UnixNano()) / time.Millisecond),
 			}
@@ -278,19 +278,9 @@ func cmdreader() {
 	}
 }
 
-//In checks if x is in l
-func In(l []string, x string) bool {
-	for i := 0; i < len(l); i++ {
-		if l[i] == x {
-			return true
-		}
-	}
-
-	return false
-}
 
 var agentData = agentdata.NewAgentData()
-var producers = agentpoll.NewManager(agentData, commandStorage)
+var pollDataStreamManager = agentpoll.NewManager(agentData, commandStorage)
 
 func getProducerChan(gid string, nid string) chan<- agentpoll.PollData {
 
@@ -305,7 +295,7 @@ func getProducerChan(gid string, nid string) chan<- agentpoll.PollData {
 
 	agentID := core.AgentID{GID: uint(igid), NID: uint(inid)}
 
-	return producers.Get(agentID)
+	return pollDataStreamManager.Get(agentID)
 }
 
 
@@ -315,8 +305,12 @@ func cmd(c *gin.Context) {
 	nid := c.Param("nid")
 
 	query := c.Request.URL.Query()
-	roles := query["role"]
 	log.Printf("[+] gin: execute (gid: %s, nid: %s)\n", gid, nid)
+
+	var roles []core.AgentRole
+	for _, roleStr := range query["role"] {
+		roles = append(roles, core.AgentRole(roleStr))
+	}
 
 	// listen for http closing
 	notify := c.Writer.(http.CloseNotifier).CloseNotify()

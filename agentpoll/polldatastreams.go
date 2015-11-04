@@ -18,7 +18,7 @@ of chan string directly to make sure of the following:
 2- Prevent multiple clients polling on a single gid:nid at the same time.
 */
 type PollData struct {
-	Roles   []string
+	Roles   []core.AgentRole
 	CommandChannel chan core.Command
 }
 
@@ -52,7 +52,7 @@ func (manager *PollDataStreamManager) Get(agentID core.AgentID) PollDataStream {
 	producer, exists := manager.running[agentID]
 
 	if exists {
-		manager.lock.RUnlock()
+		defer manager.lock.RUnlock()
 		return producer
 	}
 
@@ -91,13 +91,7 @@ func pollDataStreamLogic(
 
 		defer close(data.CommandChannel)
 
-		roles := data.Roles
-
-		var agentRoles []core.AgentRole
-		for role := range roles {
-			agentRoles = append(agentRoles, core.AgentRole(role))
-		}
-		agentData.SetRoles(agentID, agentRoles)
+		agentData.SetRoles(agentID, data.Roles)
 
 		command := <- commandStorage.CommandsForAgent(agentID)
 
