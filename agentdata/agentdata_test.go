@@ -19,10 +19,13 @@ func TestAgentData(t *testing.T) {
 
 	assert.Nil(t, d.GetRoles(id))
 	assert.Nil(t, d.GetRoles(id2))
+	assert.False(t, d.IsConnected(id))
+	assert.False(t, d.IsConnected(id2))
 
 	dummyRoles := []core.AgentRole {"dummy", "slave"}
 
 	d.SetRoles(core.AgentID{GID: 0, NID: 42}, dummyRoles)
+	assert.True(t, d.IsConnected(id))
 
 	assert.Equal(t, d.GetRoles(id), dummyRoles)
 	assert.Equal(t, d.ConnectedAgents(), []core.AgentID{id})
@@ -30,6 +33,8 @@ func TestAgentData(t *testing.T) {
 	dummyRoles2 := []core.AgentRole {"node", "super"}
 
 	d.SetRoles(core.AgentID{GID: 0, NID: 23}, dummyRoles2)
+	assert.True(t, d.IsConnected(id))
+	assert.True(t, d.IsConnected(id2))
 
 	assert.Equal(t, d.GetRoles(id2), dummyRoles2)
 	assert.Equal(t, d.GetRoles(id), dummyRoles)

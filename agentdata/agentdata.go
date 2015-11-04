@@ -75,8 +75,16 @@ func (data *agentData) HasRole(id core.AgentID, role core.AgentRole) bool {
 }
 
 func (data *agentData) IsConnected(id core.AgentID) bool {
-	// TODO
-	panic("TODO")
+	data.lock.RLock()
+	defer data.lock.RUnlock()
+
+	for agentID, _ := range data.roles {
+		if agentID == id {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Constructs a new thread-safe in-memory implementation of core.AgentInformationStorage
