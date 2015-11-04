@@ -50,3 +50,32 @@ func TestAgentData(t *testing.T) {
 
 	assert.False(t, d.HasRole(core.AgentID{GID: 1, NID: 42}, "node"))
 }
+
+
+func TestQueryingForConnectedAgentsWithFilters(t *testing.T) {
+
+	d := agentdata.NewAgentData()
+
+	id0 := core.AgentID{GID: 0, NID: 1}
+	id1 := core.AgentID{GID: 0, NID: 2}
+	id2 := core.AgentID{GID: 1, NID: 0}
+	id3 := core.AgentID{GID: 1, NID: 1}
+
+	d.SetRoles(id0, []core.AgentRole{"node", "cpu", "super"})
+	d.SetRoles(id1, []core.AgentRole{"node", "cpu", "master"})
+	d.SetRoles(id2, []core.AgentRole{"net", "super"})
+	d.SetRoles(id3, []core.AgentRole{"node", "super"})
+
+	connectedWithoutFilters := d.FilteredConnectedAgents(nil, nil)
+	assert.Len(t, connectedWithoutFilters, 4)
+
+	nodeSuperAgents := d.FilteredConnectedAgents(nil, []core.AgentRole{"node", "super"})
+	assert.Len(t, nodeSuperAgents, 2)
+	assert.Contains(t, nodeSuperAgents, id0)
+	assert.Contains(t, nodeSuperAgents, id3)
+
+	gid0 := uint(0)
+	gid0Master := d.FilteredConnectedAgents(&gid0, []core.AgentRole{"master"})
+	assert.Len(t, gid0Master, 1)
+	assert.Contains(t, gid0Master, id1)
+}

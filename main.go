@@ -98,8 +98,19 @@ func getAgentResultQueue(result *core.CommandResult) string {
 // If onlyGID is nonzero, returns only the agents with the specified onlyGID as their GID
 // If roles is set and non-empty, returns only the agents with ALL of the specified roles
 func getActiveAgents(onlyGid int, roles []string) []core.AgentID {
-	// TODO
-	panic("TODO")
+	var gidFilter *uint = nil
+	var rolesFilter []core.AgentRole = nil
+
+	if onlyGid > 0 {
+		gid := uint(onlyGid)
+		gidFilter = &gid
+	}
+
+	for _, role := range roles {
+		rolesFilter = append(rolesFilter, core.AgentRole(role))
+	}
+
+	return agentData.FilteredConnectedAgents(gidFilter, rolesFilter)
 }
 
 func sendResult(result *core.CommandResult) {
