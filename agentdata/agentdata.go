@@ -56,12 +56,12 @@ func (data *agentData) ConnectedAgents() []core.AgentID {
 }
 
 func (data *agentData) HasRole(id core.AgentID, role core.AgentRole) bool {
+	data.lock.RLock()
+	defer data.lock.RUnlock()
 
-	// TODO: This can check on the internal map without using the copy returned by GetRoles()
+	roles, exist := data.roles[id]
 
-	roles := data.GetRoles(id)
-
-	if roles == nil {
+	if !exist {
 		return false
 	}
 
