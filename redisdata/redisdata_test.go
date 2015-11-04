@@ -9,10 +9,6 @@ func TestImplementsCoreIncoming(t *testing.T) {
 	assert.Implements(t, (*core.Incoming)(nil), new(RedisData))
 }
 
-func TestImplementsCoreCommandStorage(t *testing.T) {
-	assert.Implements(t, (*core.CommandStorage)(nil), new(RedisData))
-}
-
 func TestImplementsCoreCommandLogger(t *testing.T) {
 	assert.Implements(t, (*core.CommandLogger)(nil), new(RedisData))
 }

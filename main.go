@@ -83,8 +83,8 @@ func newPool(addr string, password string) *redis.Pool {
 var pool *redis.Pool
 var redisData = redisdata.NewRedisData(pool)
 
+var commandStorage core.CommandStorage = redisdata.NewRedisCommandStorage(pool)
 var incomingCommands core.Incoming = redisData
-var commandStorage core.CommandStorage = redisData
 var commandLogger core.CommandLogger = redisData
 
 
