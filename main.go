@@ -6,30 +6,22 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"math/rand"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
-	"os/exec"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
-
 	hublleAgent "github.com/Jumpscale/hubble/agent"
 	hubbleAuth "github.com/Jumpscale/hubble/auth"
-	hublleProxy "github.com/Jumpscale/hubble/proxy"
 	"github.com/garyburd/redigo/redis"
-	"github.com/gin-gonic/gin"
-	influxdb "github.com/influxdb/influxdb/client"
-
 	"github.com/amrhassan/agentcontroller2/core"
 	"github.com/amrhassan/agentcontroller2/redisdata"
 	"github.com/amrhassan/agentcontroller2/agentdata"
 	"github.com/amrhassan/agentcontroller2/agentpoll"
+	"github.com/amrhassan/agentcontroller2/rest"
+	"github.com/amrhassan/agentcontroller2/settings"
 )
 
 const (
@@ -43,22 +35,6 @@ const (
 	cmdInternal               = "controller"
 )
 
-var influxDbTags = []string{"gid", "nid", "command", "domain", "name", "measurement"}
-
-
-//StatsRequest stats request
-type StatsRequest struct {
-	Timestamp int64           `json:"timestamp"`
-	Series    [][]interface{} `json:"series"`
-}
-
-//EvenRequest event request
-type EvenRequest struct {
-	Name string `json:"name"`
-	Data string `json:"data"`
-}
-
-// redis stuff
 func newPool(addr string, password string) *redis.Pool {
 	return &redis.Pool{
 		MaxIdle:   80,
@@ -90,9 +66,7 @@ var incomingCommands core.Incoming = redisData
 var commandLogger core.CommandLogger = redisData
 
 
-func getAgentResultQueue(result *core.CommandResult) string {
-	return fmt.Sprintf(cmdQueueAgentResponse, result.ID, result.Gid, result.Nid)
-}
+
 
 // Returns the connected agents.
 // If onlyGID is nonzero, returns only the agents with the specified onlyGID as their GID
@@ -282,352 +256,6 @@ func cmdreader() {
 var agentData = agentdata.NewAgentData()
 var pollDataStreamManager = agentpoll.NewManager(agentData, commandStorage)
 
-func getProducerChan(gid string, nid string) chan<- agentpoll.PollData {
-
-	igid, err := strconv.Atoi(gid)
-	if err != nil {
-		panic(err)
-	}
-	inid, err := strconv.Atoi(nid)
-	if err != nil {
-		panic(err)
-	}
-
-	agentID := core.AgentID{GID: uint(igid), NID: uint(inid)}
-
-	return pollDataStreamManager.Get(agentID)
-}
-
-
-// REST stuff
-func cmd(c *gin.Context) {
-	gid := c.Param("gid")
-	nid := c.Param("nid")
-
-	query := c.Request.URL.Query()
-	log.Printf("[+] gin: execute (gid: %s, nid: %s)\n", gid, nid)
-
-	var roles []core.AgentRole
-	for _, roleStr := range query["role"] {
-		roles = append(roles, core.AgentRole(roleStr))
-	}
-
-	// listen for http closing
-	notify := c.Writer.(http.CloseNotifier).CloseNotify()
-
-	timeout := 60 * time.Second
-
-	producer := getProducerChan(gid, nid)
-
-	data := agentpoll.PollData{
-		Roles:   roles,
-		CommandChannel: make(chan core.Command),
-	}
-
-	select {
-	case producer <- data:
-	case <-time.After(timeout):
-		c.String(http.StatusOK, "")
-		return
-	}
-	//at this point we are sure this is the ONLY agent polling on /gid/nid/cmd
-
-	var command core.Command
-
-	select {
-	case command = <-data.CommandChannel:
-	case <-notify:
-	case <-time.After(timeout):
-	}
-
-	jsonCommand, err := json.Marshal(&command)
-	if err != nil {
-		panic(err)
-	}
-
-	c.String(http.StatusOK, string(jsonCommand))
-}
-
-func logs(c *gin.Context) {
-	gid := c.Param("gid")
-	nid := c.Param("nid")
-
-	db := pool.Get()
-	defer db.Close()
-
-	log.Printf("[+] gin: log (gid: %s, nid: %s)\n", gid, nid)
-
-	// read body
-	content, err := ioutil.ReadAll(c.Request.Body)
-
-	if err != nil {
-		log.Println("[-] cannot read body:", err)
-		c.JSON(http.StatusInternalServerError, "error")
-		return
-	}
-
-	// push body to redis
-	id := fmt.Sprintf("%s:%s:log", gid, nid)
-	log.Printf("[+] message destination [%s]\n", id)
-
-	// push message to client queue
-	_, err = db.Do("RPUSH", id, content)
-
-	c.JSON(http.StatusOK, "ok")
-}
-
-func result(c *gin.Context) {
-	gid := c.Param("gid")
-	nid := c.Param("nid")
-
-	key := fmt.Sprintf("%s:%s", gid, nid)
-	db := pool.Get()
-	defer db.Close()
-
-	log.Printf("[+] gin: result (gid: %s, nid: %s)\n", gid, nid)
-
-	// read body
-	content, err := ioutil.ReadAll(c.Request.Body)
-
-	if err != nil {
-		log.Println("[-] cannot read body:", err)
-		c.JSON(http.StatusInternalServerError, "body error")
-		return
-	}
-
-	// decode body
-	var payload core.CommandResult
-	err = json.Unmarshal(content, &payload)
-
-	if err != nil {
-		log.Println("[-] cannot read json:", err)
-		c.JSON(http.StatusInternalServerError, "json error")
-		return
-	}
-
-	log.Println("Jobresult:", payload.ID)
-
-	// update jobresult
-	db.Do("HSET",
-		fmt.Sprintf(hashCmdResults, payload.ID),
-		key,
-		content)
-
-	// push message to client main result queue
-	db.Do("RPUSH", getAgentResultQueue(&payload), content)
-
-	c.JSON(http.StatusOK, "ok")
-}
-
-func stats(c *gin.Context) {
-	gid := c.Param("gid")
-	nid := c.Param("nid")
-
-	log.Printf("[+] gin: stats (gid: %s, nid: %s)\n", gid, nid)
-
-	// read body
-	content, err := ioutil.ReadAll(c.Request.Body)
-
-	if err != nil {
-		log.Println("[-] cannot read body:", err)
-		c.JSON(http.StatusInternalServerError, "body error")
-		return
-	}
-
-	// decode body
-	var payload []StatsRequest
-	err = json.Unmarshal(content, &payload)
-
-	if err != nil {
-		log.Println("[-] cannot read json:", err)
-		c.JSON(http.StatusInternalServerError, "json error")
-		return
-	}
-
-	u, err := url.Parse(fmt.Sprintf("http://%s", settings.Influxdb.Host))
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
-	// building Influxdb requests
-	con, err := influxdb.NewClient(influxdb.Config{
-		Username: settings.Influxdb.User,
-		Password: settings.Influxdb.Password,
-		URL:      *u,
-	})
-
-	if err != nil {
-		log.Println(err)
-	}
-
-	points := make([]influxdb.Point, 0, 100)
-
-	for _, stats := range payload {
-		for i := 0; i < len(stats.Series); i++ {
-			var value float64
-			switch v := stats.Series[i][1].(type) {
-			case int:
-				value = float64(v)
-			case float32:
-				value = float64(v)
-			case float64:
-				value = v
-			default:
-				log.Println("Invalid influxdb value:", v)
-			}
-
-			key := stats.Series[i][0].(string)
-			//key is formated as gid.nid.cmd.domain.name.[measuerment] (6 parts)
-			//so we can split it and then fill the gags.
-			tags := make(map[string]string)
-			tagsValues := strings.SplitN(key, ".", 6)
-			for i, tagValue := range tagsValues {
-				tags[influxDbTags[i]] = tagValue
-			}
-
-			point := influxdb.Point{
-				Measurement: key,
-				Time:        time.Unix(stats.Timestamp, 0),
-				Tags:        tags,
-				Fields: map[string]interface{}{
-					"value": value,
-				},
-			}
-
-			points = append(points, point)
-		}
-	}
-
-	batchPoints := influxdb.BatchPoints{
-		Points:          points,
-		Database:        settings.Influxdb.Db,
-		RetentionPolicy: "default",
-	}
-
-	if _, err := con.Write(batchPoints); err != nil {
-		log.Println("INFLUXDB ERROR:", err)
-		return
-	}
-
-	c.JSON(http.StatusOK, "ok")
-}
-
-func event(c *gin.Context) {
-	gid := c.Param("gid")
-	nid := c.Param("nid")
-
-	log.Printf("[+] gin: event (gid: %s, nid: %s)\n", gid, nid)
-
-	//force initializing of producer since the event is the first thing agent sends
-
-	getProducerChan(gid, nid)
-
-	content, err := ioutil.ReadAll(c.Request.Body)
-
-	if err != nil {
-		log.Println("[-] cannot read body:", err)
-		c.JSON(http.StatusInternalServerError, "body error")
-		return
-	}
-
-	var payload EvenRequest
-	log.Printf("%s", content)
-	err = json.Unmarshal(content, &payload)
-	if err != nil {
-		log.Println(err)
-		c.JSON(http.StatusInternalServerError, "Error")
-	}
-
-	cmd := exec.Command(settings.Handlers.Binary,
-		fmt.Sprintf("%s.py", payload.Name), gid, nid)
-
-	cmd.Dir = settings.Handlers.Cwd
-	//build env string
-	var env []string
-	if len(settings.Handlers.Env) > 0 {
-		env = make([]string, 0, len(settings.Handlers.Env))
-		for ek, ev := range settings.Handlers.Env {
-			env = append(env, fmt.Sprintf("%v=%v", ek, ev))
-		}
-
-	}
-
-	cmd.Env = env
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		log.Println("Failed to open process stderr", err)
-	}
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		log.Println("Failed to open process stderr", err)
-	}
-
-	log.Println("Starting handler for", payload.Name, "event, for agent", gid, nid)
-	err = cmd.Start()
-	if err != nil {
-		log.Println(err)
-	} else {
-		go func() {
-			//wait for command to exit.
-			cmderrors, err := ioutil.ReadAll(stderr)
-			if err != nil {
-				log.Println(err)
-			}
-
-			cmdoutput, err := ioutil.ReadAll(stdout)
-			if err != nil {
-				log.Println(err)
-			}
-
-			err = cmd.Wait()
-			if err != nil {
-				log.Println("Failed to handle ", payload.Name, " event for agent: ", gid, nid, err)
-				log.Println(string(cmdoutput))
-				log.Println(string(cmderrors))
-			}
-		}()
-	}
-
-	c.JSON(http.StatusOK, "ok")
-}
-
-/*
-Gets hashed scripts from redis.
-*/
-func script(c *gin.Context) {
-
-	query := c.Request.URL.Query()
-	hashes, ok := query["hash"]
-	if !ok {
-		// that's an error. Hash is required.
-		c.String(http.StatusBadRequest, "Missing 'hash' param")
-		return
-	}
-
-	hash := hashes[0]
-
-	db := pool.Get()
-	defer db.Close()
-
-	payload, err := redis.String(db.Do("GET", hash))
-	if err != nil {
-		log.Println("Script get error:", err)
-		c.String(http.StatusNotFound, "Script with hash '%s' not found", hash)
-		return
-	}
-
-	log.Println(payload)
-
-	c.String(http.StatusOK, payload)
-}
-
-func handlHubbleProxy(context *gin.Context) {
-	hublleProxy.ProxyHandler(context.Writer, context.Request)
-}
-
 //StartSyncthingHubbleAgent start the builtin hubble agent required for Syncthing
 func StartSyncthingHubbleAgent(hubblePort int) {
 
@@ -648,10 +276,9 @@ func StartSyncthingHubbleAgent(hubblePort int) {
 	agent.Start(onExit)
 }
 
-var settings Settings
-
 func main() {
 	var cfg string
+	var globalSettings settings.Settings
 
 	flag.StringVar(&cfg, "c", "", "Path to config file")
 	flag.Parse()
@@ -663,14 +290,14 @@ func main() {
 	}
 
 	var err error
-	settings, err = LoadSettingsFromTomlFile(cfg)
+	globalSettings, err = settings.LoadSettingsFromTomlFile(cfg)
 	if err != nil {
 		log.Panicln("Error loading configuration file:", err)
 	}
 
-	log.Printf("[+] redis server: <%s>\n", settings.Main.RedisHost)
+	log.Printf("[+] redis server: <%s>\n", globalSettings.Main.RedisHost)
 
-	pool = newPool(settings.Main.RedisHost, settings.Main.RedisPassword)
+	pool = newPool(globalSettings.Main.RedisHost, globalSettings.Main.RedisPassword)
 
 	db := pool.Get()
 	if _, err := db.Do("PING"); err != nil {
@@ -679,7 +306,7 @@ func main() {
 
 	db.Close()
 
-	router := gin.Default()
+	restInterface := rest.NewRestInterface(pool, pollDataStreamManager, &globalSettings)
 
 	go cmdreader()
 
@@ -692,20 +319,14 @@ func main() {
 	scheduler.Start()
 
 	hubbleAuth.Install(hubbleAuth.NewAcceptAllModule())
-	router.GET("/:gid/:nid/cmd", cmd)
-	router.POST("/:gid/:nid/log", logs)
-	router.POST("/:gid/:nid/result", result)
-	router.POST("/:gid/:nid/stats", stats)
-	router.POST("/:gid/:nid/event", event)
-	router.GET("/:gid/:nid/hubble", handlHubbleProxy)
-	router.GET("/:gid/:nid/script", script)
+
 	// router.Static("/doc", "./doc")
 
 	var wg sync.WaitGroup
-	wg.Add(len(settings.Listen))
-	for _, httpBinding := range settings.Listen {
-		go func(httpBinding HTTPBinding) {
-			server := &http.Server{Addr: httpBinding.Address, Handler: router}
+	wg.Add(len(globalSettings.Listen))
+	for _, httpBinding := range globalSettings.Listen {
+		go func(httpBinding settings.HTTPBinding) {
+			server := &http.Server{Addr: httpBinding.Address, Handler: restInterface.Router()}
 			if httpBinding.TLSEnabled() {
 				server.TLSConfig = &tls.Config{}
 
@@ -738,7 +359,7 @@ func main() {
 		}(httpBinding)
 	}
 
-	StartSyncthingHubbleAgent(settings.Syncthing.Port)
+	StartSyncthingHubbleAgent(globalSettings.Syncthing.Port)
 
 	wg.Wait()
 }
